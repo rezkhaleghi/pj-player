@@ -3,30 +3,100 @@ use std::process::Command;
 use std::env;
 use serde_json::Value;
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self};
+
+#[derive(Debug)]
+enum Source {
+    WWW,
+    YouTube,
+    Spotify,
+    InternetArchive,
+}
+
+#[async_trait::async_trait]
+trait SourceHandler {
+    async fn search(&self, query: &str) -> Result<Vec<(String, String, Source)>, Box<dyn std::error::Error>>;
+    fn download(&self, identifier: &str, title: &str) -> Result<(), Box<dyn std::error::Error>>;
+}
+
+#[async_trait::async_trait]
+impl SourceHandler for Source {
+    async fn search(&self, query: &str) -> Result<Vec<(String, String, Source)>, Box<dyn std::error::Error>> {
+        match self {
+            Source::WWW => {
+                let mut results = Vec::new();
+                if let Ok(mut youtube_results) = search_youtube(query).await {
+                    results.append(&mut youtube_results);
+                }
+                if let Ok(mut archive_results) = search_archive(query).await {
+                    results.append(&mut archive_results);
+                }
+                if results.is_empty() {
+                    Err("No results found".into())
+                } else {
+                    Ok(results)
+                }
+            }
+            Source::YouTube => search_youtube(query).await,
+            Source::Spotify => Err("Spotify search not implemented yet".into()),  // Implement Spotify search here
+            Source::InternetArchive => search_archive(query).await,
+        }
+    }
+
+    fn download(&self, identifier: &str, title: &str) -> Result<(), Box<dyn std::error::Error>> {
+        match self {
+            Source::YouTube => download_youtube_audio(identifier, title),
+            Source::Spotify => Err("Spotify download not implemented yet".into()),  // Implement Spotify download here
+            Source::InternetArchive => download_archive_audio(identifier, title),
+            Source::WWW => Err("WWW download not supported directly".into()), // WWW should not directly handle downloads
+        }
+    }
+}
 
 #[tokio::main]
 async fn main() {
     dotenv::dotenv().ok();
-    let song_query = "Shape of You Ed Sheeran";
+    let song_query = get_query_from_terminal();
 
-    // Try YouTube
-    match search_youtube(song_query).await {
+    // Ask the user to choose a source
+    println!("Where would you like to search for the song?");
+    println!("1. YouTube");
+    println!("2. Internet Archive");
+    println!("3. Spotify");
+    println!("4. WWW (YouTube + Internet Archive)");
+
+    let mut input = String::new();
+    io::stdin().read_line(&mut input).expect("Failed to read line");
+    let choice: usize = input.trim().parse().expect("Invalid input");
+
+    let source = match choice {
+        1 => Source::YouTube,
+        2 => Source::InternetArchive,
+        3 => Source::Spotify,
+        4 => Source::WWW,
+        _ => {
+            println!("Invalid choice");
+            return;
+        }
+    };
+
+    // Search for the song and handle download
+    match source.search(&song_query).await {
         Ok(results) => {
-            println!("Found the following videos on YouTube:");
-            for (i, (video_id, title)) in results.iter().enumerate() {
-                println!("{}. {} (ID: {})", i + 1, title, video_id);
+            println!("Found the following results:");
+            for (i, (identifier, title, src)) in results.iter().enumerate() {
+                println!("{}. {} (ID: {}, Source: {:?})", i + 1, title, identifier, src);
             }
 
-            println!("Enter the number of the video you want to download:");
+            println!("Enter the number of the result you want to download:");
             let mut input = String::new();
             io::stdin().read_line(&mut input).expect("Failed to read line");
             let choice: usize = input.trim().parse().expect("Invalid input");
 
             if choice > 0 && choice <= results.len() {
-                let (video_id, title) = &results[choice - 1];
+                let (identifier, title, src) = &results[choice - 1];
                 println!("Downloading audio...");
-                if let Err(e) = download_youtube_audio(video_id, title) {
+                if let Err(e) = src.download(identifier, title) {
                     eprintln!("Error downloading audio: {}", e);
                 } else {
                     println!("Download complete!");
@@ -36,14 +106,15 @@ async fn main() {
             }
         }
         Err(e) => {
-            eprintln!("Error searching on YouTube: {}", e);
+            eprintln!("Error searching: {}", e);
         }
     }
 }
 
 /// Searches for a song on YouTube using the YouTube Data API.
-async fn search_youtube(query: &str) -> Result<Vec<(String, String)>, Box<dyn std::error::Error>> {
-    let api_key = env::var("YOUTUBE_API_KEY").expect("Missing YouTube API Key");
+async fn search_youtube(query: &str) -> Result<Vec<(String, String, Source)>, Box<dyn std::error::Error>> {
+    // let api_key = env::var("YOUTUBE_API_KEY").expect("Missing YouTube API Key");
+    let api_key = "AIzaSyD9sc6z8J8I-imV-htavHTb1NP_q3EDcOY";
     let url = format!(
         "https://www.googleapis.com/youtube/v3/search?part=snippet&q={}&type=video&maxResults=10&key={}",
         query, api_key
@@ -60,7 +131,7 @@ async fn search_youtube(query: &str) -> Result<Vec<(String, String)>, Box<dyn st
                 item["id"]["videoId"].as_str(),
                 item["snippet"]["title"].as_str(),
             ) {
-                results.push((video_id.to_string(), title.to_string()));
+                results.push((video_id.to_string(), title.to_string(), Source::YouTube));
             }
         }
     }
@@ -72,9 +143,38 @@ async fn search_youtube(query: &str) -> Result<Vec<(String, String)>, Box<dyn st
     }
 }
 
+/// Searches for a song on Archive.org using the advanced search API.
+async fn search_archive(query: &str) -> Result<Vec<(String, String, Source)>, Box<dyn std::error::Error>> {
+    let url = format!(
+        "https://archive.org/advancedsearch.php?q={}&output=json",
+        query.replace(" ", "+")
+    );
+
+    let client = Client::new();
+    let response = client.get(&url).send().await?;
+    let json: Value = response.json().await?;
+
+    let mut results = Vec::new();
+    if let Some(items) = json["response"]["docs"].as_array() {
+        for item in items {
+            if let Some(identifier) = item["identifier"].as_str() {
+                if let Some(title) = item["title"].as_str() {
+                    results.push((identifier.to_string(), title.to_string(), Source::InternetArchive));
+                }
+            }
+        }
+    }
+
+    if results.is_empty() {
+        Err("No tracks found".into())
+    } else {
+        Ok(results)
+    }
+}
+
 /// Downloads the audio of a YouTube video using yt-dlp.
 fn download_youtube_audio(video_id: &str, title: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let download_path = "./downloads";
+    let download_path = "./";
     fs::create_dir_all(download_path)?; // Ensure the directory exists
 
     let sanitized_title = title.replace("/", "_").replace("\\", "_");
@@ -98,4 +198,48 @@ fn download_youtube_audio(video_id: &str, title: &str) -> Result<(), Box<dyn std
     }
 
     Ok(())
+}
+
+/// Downloads the audio of a track from Archive.org.
+fn download_archive_audio(identifier: &str, title: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let download_path = "./";
+    fs::create_dir_all(download_path)?; // Ensure the directory exists
+
+    let sanitized_title = title.replace("/", "_").replace("\\", "_");
+    let output_path = format!("{}/{} (PJ-PLAYER).mp3", download_path, sanitized_title);
+    let download_url = format!("https://archive.org/download/{}/{}", identifier, identifier);
+
+    println!("Downloading audio to: {}", output_path);
+
+    // Download file using `wget` or any preferred download tool
+    let status = Command::new("wget")
+        .args(&[
+            "-O", &output_path,
+            &download_url,
+        ])
+        .status();
+
+    match status {
+        Ok(status) if status.success() => println!("Download completed successfully."),
+        Ok(status) => println!("wget returned an error: Exit code {}", status),
+        Err(err) => println!("Error executing wget: {}", err),
+    }
+
+    Ok(())
+}
+
+fn get_query_from_terminal() -> String {
+    // First, try to get the query from command line arguments
+    let args: Vec<String> = env::args().collect();
+    if args.len() > 1 {
+        return args[1].clone(); // Get the first argument as the search query
+    }
+
+    // If no arguments, prompt the user for the search query
+    println!("Enter the search query:");
+    let mut query = String::new();
+    io::stdin()
+        .read_line(&mut query)
+        .expect("Failed to read line");
+    query.trim().to_string() // Return the query without trailing whitespace
 }
