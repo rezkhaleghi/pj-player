@@ -71,7 +71,7 @@ To use [`PJ-Player`]
 
 3. **Select the result number you wish to download from the search results list and wait for the file to finish downloading.**:
 
-````sh
+```sh
 Found the following results:
 1. Portishead - Glory Box (ID: 4qQyUi4zfDs, Source: YouTube)
 2. Portishead - Glory Box - Remastered (ID: yAKX51r7erw, Source: YouTube)
@@ -105,4 +105,7 @@ This project is licensed under the MIT License. See the LICENSE file for details
 - [Rust Programming Language](https://www.rust-lang.org/)
 
 # pj-grep
-````
+
+```
+
+```
