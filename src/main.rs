@@ -60,14 +60,17 @@ async fn main() {
 
     // Ask the user to choose a source
     println!("Where would you like to search for the song?");
+    println!("(Press ENTER to default to WWW)");
     println!("1. YouTube");
     println!("2. Internet Archive");
     println!("3. Spotify");
-    println!("4. WWW (YouTube + Internet Archive)");
+    // println!("4. WWW (YouTube + Internet Archive)");
 
     let mut input = String::new();
     io::stdin().read_line(&mut input).expect("Failed to read line");
-    let choice: usize = input.trim().parse().expect("Invalid input");
+
+    // If input is empty, default to WWW (4)
+    let choice: usize = input.trim().parse().unwrap_or(4); // Default to 4 (WWW) if input is empty or invalid
 
     let source = match choice {
         1 => Source::YouTube,
@@ -113,8 +116,7 @@ async fn main() {
 
 /// Searches for a song on YouTube using the YouTube Data API.
 async fn search_youtube(query: &str) -> Result<Vec<(String, String, Source)>, Box<dyn std::error::Error>> {
-    // let api_key = env::var("YOUTUBE_API_KEY").expect("Missing YouTube API Key");
-    let api_key = "AIzaSyD9sc6z8J8I-imV-htavHTb1NP_q3EDcOY";
+    let api_key = "AIzaSyD9sc6z8J8I-imV-htavHTb1NP_q3EDcOY";  // Add your API key here
     let url = format!(
         "https://www.googleapis.com/youtube/v3/search?part=snippet&q={}&type=video&maxResults=10&key={}",
         query, api_key
@@ -236,10 +238,10 @@ fn get_query_from_terminal() -> String {
     }
 
     // If no arguments, prompt the user for the search query
-    println!("Enter the search query:");
+println!("Please enter the name of the song or artist you'd like to search for (e.g., 'Glorybox by Portishead' or 'Tool Sober'): ");
     let mut query = String::new();
     io::stdin()
         .read_line(&mut query)
         .expect("Failed to read line");
-    query.trim().to_string() // Return the query without trailing whitespace
+    query.trim().to_string()
 }
