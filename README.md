@@ -49,12 +49,12 @@ To use [`PJ-Player`]
    Optionally, you can copy the binary to a directory in your `$PATH` (e.g., `/usr/local/bin` or `~/bin`) for easy access:
 
    ```sh
-   cp target/release/pjplayer /usr/local/bin/pjplayer
+   sudo cp target/release/pjplayer /usr/local/bin/pjplayer
    ```
 
 ## Usage
 
-1. **Run the application without any arguments**:
+1. **Run the application and search for your favorite music**:
 
    For Download:
 
@@ -77,21 +77,44 @@ To use [`PJ-Player`]
    2. Internet Archive
    ```
 
-3. **Select the result number you wish to Download / Stream from the search results list and wait for the file to finish downloading or Steam it immediately!**:
+3. **Select the result number you wish to Download / Stream from the search results list:**:
 
-```sh
-Found the following results:
-1. Portishead - Glory Box (ID: 4qQyUi4zfDs, Source: YouTube)
-2. Portishead - Glory Box - Remastered (ID: yAKX51r7erw, Source: YouTube)
-3. Portishead Glory Box Live At Roseland NY ( Best Audio) (ID: MnMTK8EdsOc, Source: YouTube)
-4. Portishead - Glory Box (lyrics) (ID: g2lhOPjLEfk, Source: YouTube)
-5. Portishead - Glory box (Roseland NYC) (HQ) (ID: SLrkE6T_m5Y, Source: YouTube)
-6. Glory Box (Live) (ID: JBfAtRvW1Ao, Source: YouTube)
-7. Portishead - Glory Box (Lyrics) [Tiktok Song] (ID: 2XTLhm6EcFw, Source: YouTube)
-8. Portishead Glory Box Live (ID: C3LK5ELvZwI, Source: YouTube)
-9. Portishead - Glory Box (HD Version) (ID: 6ylDDs3mdJE, Source: YouTube)
-10. Portishead - glory box (ID: yF-GvT8Clnk, Source: YouTube)
-```
+   After selecting the source, you will see the following results:
+
+   ```sh
+   Found the following results:
+   1. Portishead - Glory Box (ID: 4qQyUi4zfDs, Source: YouTube)
+   2. Portishead - Glory Box - Remastered (ID: yAKX51r7erw, Source: YouTube)
+   3. Portishead Glory Box Live At Roseland NY ( Best Audio) (ID: MnMTK8EdsOc, Source: YouTube)
+   4. Portishead - Glory Box (lyrics) (ID: g2lhOPjLEfk, Source: YouTube)
+   5. Portishead - Glory box (Roseland NYC) (HQ) (ID: SLrkE6T_m5Y, Source: YouTube)
+   6. Glory Box (Live) (ID: JBfAtRvW1Ao, Source: YouTube)
+   7. Portishead - Glory Box (Lyrics) [Tiktok Song] (ID: 2XTLhm6EcFw, Source: YouTube)
+   8. Portishead Glory Box Live (ID: C3LK5ELvZwI, Source: YouTube)
+   9. Portishead - Glory Box (HD Version) (ID: 6ylDDs3mdJE, Source: YouTube)
+   10. Portishead - glory box (ID: yF-GvT8Clnk, Source: YouTube)
+   ```
+
+4. **Stream Or wait for Download**:
+
+   After selecting the result, you will be prompted with two options:
+
+   - To wait for the download to finish:
+
+   If you choose to download the file first, you will see the message:
+
+   ```sh
+   Download started...
+   Download completed successfully.
+   ```
+
+   - To stream immediately:
+
+   If you choose to stream the song immediately, you will see the message and then shows the Audio Visualizer (cava) :
+
+   ```sh
+   <YOU FAVORITE SONG> IS STREAMING...
+   ```
 
 ## Contributing
 
