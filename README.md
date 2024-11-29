@@ -103,9 +103,3 @@ This project is licensed under the MIT License. See the LICENSE file for details
 ## Acknowledgements
 
 - [Rust Programming Language](https://www.rust-lang.org/)
-
-# pj-grep
-
-```
-
-```
