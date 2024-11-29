@@ -1,10 +1,10 @@
 use reqwest::Client;
-use std::process::Command;
 use std::env;
 use serde_json::Value;
 use std::fs;
 use std::io::{self};
-
+use std::process::{Command, Stdio};
+use std::error::Error;
 #[derive(Debug)]
 enum Source {
     WWW,
@@ -19,6 +19,10 @@ trait SourceHandler {
     fn download(&self, identifier: &str, title: &str) -> Result<(), Box<dyn std::error::Error>>;
     fn stream(&self, identifier: &str) -> Result<(), Box<dyn std::error::Error>>;
 }
+
+const CYAN: &str = "\x1b[36m";
+const RESET: &str = "\x1b[0m";
+const GREEN: &str = "\x1b[32m";
 
 #[async_trait::async_trait]
 impl SourceHandler for Source {
@@ -68,11 +72,14 @@ async fn main() {
     let play_flag = args.contains(&"--play".to_string());
 
     let song_query = get_query_from_terminal();
-    println!("Where would you like to search for the song?");
-    println!("(Press ENTER to default to WWW)");
+    println!("{} -------------------------------------------- {}", CYAN, RESET);
+    println!("{} Where would you like to search for the song? {}", CYAN, RESET);
+    println!("{}       (Press ENTER to default to WWW) {}",CYAN, RESET);
+    println!("{} -------------------------------------------- {}", CYAN, RESET);
+
     println!("1. YouTube");
     println!("2. Internet Archive");
-    println!("3. Spotify");
+    // println!("3. Spotify");
 
     let mut input = String::new();
     io::stdin().read_line(&mut input).expect("Failed to read line");
@@ -91,12 +98,19 @@ async fn main() {
 
     match source.search(&song_query).await {
         Ok(results) => {
-            println!("Found the following results:");
+            // println!("Found the following results:");
+            println!("--------------------------------------------");
+
             for (i, (identifier, title, src)) in results.iter().enumerate() {
                 println!("{}. {} (ID: {}, Source: {:?})", i + 1, title, identifier, src);
             }
+            println!("--------------------------------------------");
 
-            println!("Enter the number of the result you want to select:");
+            println!("{} -------------------------------------------- {}", CYAN, RESET);
+            println!("{} Enter the number of the result you want to select: {}", CYAN, RESET);
+            println!("{} -------------------------------------------- {}", CYAN, RESET);
+
+            // println!("Enter the number of the result you want to select:");
             let mut input = String::new();
             io::stdin().read_line(&mut input).expect("Failed to read line");
             let choice: usize = input.trim().parse().expect("Invalid input");
@@ -126,30 +140,6 @@ async fn main() {
     }
 }
 
-fn stream_audio(video_id: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let youtube_url = format!("https://www.youtube.com/watch?v={}", video_id);
-
-    // Stream audio directly using yt-dlp and ffplay
-    let yt_dlp = Command::new("yt-dlp")
-        .args(&[
-            "-o", "-",          // Output to stdout
-            "-f", "bestaudio",  // Choose the best audio stream
-            "--quiet",
-            &youtube_url,
-        ])
-        .stdout(std::process::Stdio::piped())
-        .spawn()?;
-
-    let status = Command::new("ffplay")
-        .args(&["-nodisp", "-autoexit", "-"])
-        .stdin(yt_dlp.stdout.unwrap())
-        .status();
-
-    match status {
-        Ok(_) => Ok(()),
-        Err(e) => Err(format!("Failed to stream audio: {}", e).into()),
-    }
-}
 
 /// Searches for a song on YouTube using the YouTube Data API.
 async fn search_youtube(query: &str) -> Result<Vec<(String, String, Source)>, Box<dyn std::error::Error>> {
@@ -284,3 +274,59 @@ println!("Please enter the name of the song or artist you'd like to search for (
     query.trim().to_string()
 }
 
+
+
+fn stream_audio(video_id: &str) -> Result<(), Box<dyn Error>> {
+    let youtube_url = format!("https://www.youtube.com/watch?v={}", video_id);
+
+    // Get the song name from yt-dlp using a query to extract metadata (e.g., title)
+    let output = Command::new("yt-dlp")
+        .args(&[
+            "-s",             // Simulate download (don't download actual content)
+            "--get-title",    // Get the title of the video (song name)
+            &youtube_url,
+        ])
+        .output()?;  // Capture output
+
+    // Extract the song name from the command output
+    let song_name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+    // Display a message about the song being streamed
+    // println!("{} IS STREAMING...", song_name);
+
+    println!("\n{} ~ {:?} IS STREAMING... {}", GREEN, song_name, RESET);
+
+    // Stream audio directly using yt-dlp and ffplay
+    let yt_dlp = Command::new("yt-dlp")
+        .args(&[
+            "-o", "-",           // Output to stdout
+            "-f", "bestaudio",   // Choose the best audio stream
+            "--quiet",           // Suppress unnecessary output from yt-dlp
+            &youtube_url,
+        ])
+        .stdout(Stdio::piped())    // Pipe yt-dlp output to ffplay
+        .stderr(Stdio::null())     // Suppress stderr from yt-dlp
+        .spawn()?;                 // Spawn the yt-dlp process
+
+    // Run ffplay with minimal output, showing the visualization
+    let status = Command::new("ffplay")
+        .args(&[
+            "-nodisp",           // Disable video display
+            "-autoexit",         // Exit when audio finishes
+            "-showmode", "2",    // Show visualization (2 means show the spectrum)
+            "-vf", "showwaves=s=1280x720", // Enable equalizer (spectrum filter)
+            "-loglevel", "quiet", // Suppress other ffplay output
+            "-",
+        ])
+        .stdin(yt_dlp.stdout.unwrap())  // Pass yt-dlp's stdout to ffplay's stdin
+        .stdout(Stdio::null())           // Suppress ffplay's stdout
+        .stderr(Stdio::null())           // Suppress ffplay's stderr
+        .status()?;                      // Wait for the ffplay process to finish
+
+    // Check if the ffplay process finished successfully
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("ffplay exited with status: {}", status).into())
+    }
+}
