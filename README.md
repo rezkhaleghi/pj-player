@@ -1,6 +1,6 @@
 # PJ-Player
 
-PJ-Player is a Rust-based application that allows users to search, download, and stream audio tracks directly from the terminal. Users can search for music from various sources like YouTube, Internet Archive, and more. The program supports streaming music instantly using tools like yt-dlp and ffplay, as well as downloading audio using external tools like yt-dlp and wget. Whether you want to stream your favorite songs or download them for offline listening, PJ-Player makes it easy to access and enjoy music from multiple platforms through their respective APIs.
+PJ-Player is a Rust-based application that allows users to search, DOWNLOAD or STREAM audio tracks directly from the terminal. Users can search for music from various sources like YouTube, Internet Archive, and more. The program supports streaming music instantly using tools like yt-dlp and ffplay (and cava for Audio Visualizer), as well as downloading audio using external tools like yt-dlp and wget. Whether you want to stream your favorite songs or download them for offline listening, PJ-Player makes it easy to access and enjoy music from multiple platforms through their respective APIs.
 
 ## Features
 
