@@ -1,6 +1,6 @@
 # PJ-Player
 
-PJ-Player is a Rust-based application that allows users to search and download audio tracks from various sources like YouTube and Internet Archive. The program uses external tools like `yt-dlp` and `wget` for downloading audio and supports searching from multiple platforms via their respective APIs.
+PJ-Player is a Rust-based application that allows users to search, download, and stream audio tracks directly from the terminal. Users can search for music from various sources like YouTube, Internet Archive, and more. The program supports streaming music instantly using tools like yt-dlp and ffplay, as well as downloading audio using external tools like yt-dlp and wget. Whether you want to stream your favorite songs or download them for offline listening, PJ-Player makes it easy to access and enjoy music from multiple platforms through their respective APIs.
 
 ## Features
 
@@ -56,8 +56,16 @@ To use [`PJ-Player`]
 
 1. **Run the application without any arguments**:
 
+   For Download:
+
    ```sh
    pjplayer "Portishead Glorybox"
+   ```
+
+   For Stream:
+
+   ```sh
+   pjplayer "Portishead Glorybox" --play
    ```
 
 2. **Select the source where you want to search for the song**:
@@ -69,7 +77,7 @@ To use [`PJ-Player`]
    2. Internet Archive
    ```
 
-3. **Select the result number you wish to download from the search results list and wait for the file to finish downloading.**:
+3. **Select the result number you wish to Download / Stream from the search results list and wait for the file to finish downloading or Steam it immediately!**:
 
 ```sh
 Found the following results:

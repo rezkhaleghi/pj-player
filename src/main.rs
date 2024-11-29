@@ -17,6 +17,7 @@ enum Source {
 trait SourceHandler {
     async fn search(&self, query: &str) -> Result<Vec<(String, String, Source)>, Box<dyn std::error::Error>>;
     fn download(&self, identifier: &str, title: &str) -> Result<(), Box<dyn std::error::Error>>;
+    fn stream(&self, identifier: &str) -> Result<(), Box<dyn std::error::Error>>;
 }
 
 #[async_trait::async_trait]
@@ -38,7 +39,7 @@ impl SourceHandler for Source {
                 }
             }
             Source::YouTube => search_youtube(query).await,
-            Source::Spotify => Err("Spotify search not implemented yet".into()),  // Implement Spotify search here
+            Source::Spotify => Err("Spotify search not implemented yet".into()),
             Source::InternetArchive => search_archive(query).await,
         }
     }
@@ -46,9 +47,16 @@ impl SourceHandler for Source {
     fn download(&self, identifier: &str, title: &str) -> Result<(), Box<dyn std::error::Error>> {
         match self {
             Source::YouTube => download_youtube_audio(identifier, title),
-            Source::Spotify => Err("Spotify download not implemented yet".into()),  // Implement Spotify download here
+            Source::Spotify => Err("Spotify download not implemented yet".into()),
             Source::InternetArchive => download_archive_audio(identifier, title),
-            Source::WWW => Err("WWW download not supported directly".into()), // WWW should not directly handle downloads
+            Source::WWW => Err("WWW download not supported directly".into()),
+        }
+    }
+
+    fn stream(&self, identifier: &str) -> Result<(), Box<dyn std::error::Error>> {
+        match self {
+            Source::YouTube => stream_audio(identifier),
+            _ => Err("Streaming not implemented for this source".into()),
         }
     }
 }
@@ -56,21 +64,19 @@ impl SourceHandler for Source {
 #[tokio::main]
 async fn main() {
     dotenv::dotenv().ok();
-    let song_query = get_query_from_terminal();
+    let args: Vec<String> = env::args().collect();
+    let play_flag = args.contains(&"--play".to_string());
 
-    // Ask the user to choose a source
+    let song_query = get_query_from_terminal();
     println!("Where would you like to search for the song?");
     println!("(Press ENTER to default to WWW)");
     println!("1. YouTube");
     println!("2. Internet Archive");
     println!("3. Spotify");
-    // println!("4. WWW (YouTube + Internet Archive)");
 
     let mut input = String::new();
     io::stdin().read_line(&mut input).expect("Failed to read line");
-
-    // If input is empty, default to WWW (4)
-    let choice: usize = input.trim().parse().unwrap_or(4); // Default to 4 (WWW) if input is empty or invalid
+    let choice: usize = input.trim().parse().unwrap_or(4);
 
     let source = match choice {
         1 => Source::YouTube,
@@ -83,7 +89,6 @@ async fn main() {
         }
     };
 
-    // Search for the song and handle download
     match source.search(&song_query).await {
         Ok(results) => {
             println!("Found the following results:");
@@ -91,18 +96,25 @@ async fn main() {
                 println!("{}. {} (ID: {}, Source: {:?})", i + 1, title, identifier, src);
             }
 
-            println!("Enter the number of the result you want to download:");
+            println!("Enter the number of the result you want to select:");
             let mut input = String::new();
             io::stdin().read_line(&mut input).expect("Failed to read line");
             let choice: usize = input.trim().parse().expect("Invalid input");
 
             if choice > 0 && choice <= results.len() {
                 let (identifier, title, src) = &results[choice - 1];
-                println!("Downloading audio...");
-                if let Err(e) = src.download(identifier, title) {
-                    eprintln!("Error downloading audio: {}", e);
+                if play_flag {
+                    println!("Streaming audio...");
+                    if let Err(e) = src.stream(identifier) {
+                        eprintln!("Error streaming audio: {}", e);
+                    }
                 } else {
-                    println!("Download complete!");
+                    println!("Downloading audio...");
+                    if let Err(e) = src.download(identifier, title) {
+                        eprintln!("Error downloading audio: {}", e);
+                    } else {
+                        println!("Download complete!");
+                    }
                 }
             } else {
                 println!("Invalid choice");
@@ -111,6 +123,31 @@ async fn main() {
         Err(e) => {
             eprintln!("Error searching: {}", e);
         }
+    }
+}
+
+fn stream_audio(video_id: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let youtube_url = format!("https://www.youtube.com/watch?v={}", video_id);
+
+    // Stream audio directly using yt-dlp and ffplay
+    let yt_dlp = Command::new("yt-dlp")
+        .args(&[
+            "-o", "-",          // Output to stdout
+            "-f", "bestaudio",  // Choose the best audio stream
+            "--quiet",
+            &youtube_url,
+        ])
+        .stdout(std::process::Stdio::piped())
+        .spawn()?;
+
+    let status = Command::new("ffplay")
+        .args(&["-nodisp", "-autoexit", "-"])
+        .stdin(yt_dlp.stdout.unwrap())
+        .status();
+
+    match status {
+        Ok(_) => Ok(()),
+        Err(e) => Err(format!("Failed to stream audio: {}", e).into()),
     }
 }
 
@@ -230,6 +267,7 @@ fn download_archive_audio(identifier: &str, title: &str) -> Result<(), Box<dyn s
     Ok(())
 }
 
+/// Get the search query from the terminal arguments or user input.
 fn get_query_from_terminal() -> String {
     // First, try to get the query from command line arguments
     let args: Vec<String> = env::args().collect();
@@ -245,3 +283,4 @@ println!("Please enter the name of the song or artist you'd like to search for (
         .expect("Failed to read line");
     query.trim().to_string()
 }
+

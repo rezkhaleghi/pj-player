@@ -1,0 +1,8 @@
+[bundle]
+name = "PJPlayer"
+identifier = "com.example.pjplayer"
+version = "0.1.0"
+ #icon = "path/to/icon.icns"  # Optional: Path to your app icon
+
+[[bundle.targets]]
+target = "x86_64-apple-darwin"
