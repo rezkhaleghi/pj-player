@@ -5,6 +5,8 @@ use std::fs;
 use std::io::{self};
 use std::process::{Command, Stdio};
 use std::error::Error;
+use std::thread;
+
 #[derive(Debug)]
 enum Source {
     WWW,
@@ -275,7 +277,7 @@ println!("Please enter the name of the song or artist you'd like to search for (
 }
 
 
-
+/// Streams the audio of a YouTube video using yt-dlp and ffplay.
 fn stream_audio(video_id: &str) -> Result<(), Box<dyn Error>> {
     let youtube_url = format!("https://www.youtube.com/watch?v={}", video_id);
 
@@ -292,9 +294,16 @@ fn stream_audio(video_id: &str) -> Result<(), Box<dyn Error>> {
     let song_name = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
     // Display a message about the song being streamed
-    // println!("{} IS STREAMING...", song_name);
-
     println!("\n{} ~ {:?} IS STREAMING... {}", GREEN, song_name, RESET);
+    
+    // Spawn a thread to run Cava visualizer
+    let cava_thread = thread::spawn(|| {
+        Command::new("cava")
+            .stdout(Stdio::inherit())  // Direct Cava output to the terminal
+            .stderr(Stdio::inherit())
+            .status()
+            .expect("Failed to start Cava");
+    });
 
     // Stream audio directly using yt-dlp and ffplay
     let yt_dlp = Command::new("yt-dlp")
@@ -308,13 +317,11 @@ fn stream_audio(video_id: &str) -> Result<(), Box<dyn Error>> {
         .stderr(Stdio::null())     // Suppress stderr from yt-dlp
         .spawn()?;                 // Spawn the yt-dlp process
 
-    // Run ffplay with minimal output, showing the visualization
+    // Run ffplay with minimal output
     let status = Command::new("ffplay")
         .args(&[
             "-nodisp",           // Disable video display
             "-autoexit",         // Exit when audio finishes
-            "-showmode", "2",    // Show visualization (2 means show the spectrum)
-            "-vf", "showwaves=s=1280x720", // Enable equalizer (spectrum filter)
             "-loglevel", "quiet", // Suppress other ffplay output
             "-",
         ])
@@ -323,8 +330,9 @@ fn stream_audio(video_id: &str) -> Result<(), Box<dyn Error>> {
         .stderr(Stdio::null())           // Suppress ffplay's stderr
         .status()?;                      // Wait for the ffplay process to finish
 
-    // Check if the ffplay process finished successfully
+    // Wait for the Cava thread to finish (if ffplay ends first)
     if status.success() {
+        cava_thread.join().ok(); // Gracefully stop Cava
         Ok(())
     } else {
         Err(format!("ffplay exited with status: {}", status).into())

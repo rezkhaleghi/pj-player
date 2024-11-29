@@ -16,7 +16,11 @@ sudo apt-get install -y wget
 
 # Install ffmpeg
 echo "Installing ffmpeg..."
-sudo apt install ffmpeg  
+sudo apt install -y ffmpeg
+
+# Install Cava
+echo "Installing Cava..."
+sudo apt-get install -y cava
 
 # Install dotenv crate
 # echo "Installing dotenv crate..."
