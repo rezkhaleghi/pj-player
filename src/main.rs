@@ -1,183 +1,154 @@
-use reqwest::Client;
-use std::env;
-use serde_json::Value;
-use std::fs;
-use std::io::{self};
-use std::process::{Command, Stdio};
-use std::error::Error;
-use std::thread;
+// Hello Friend :)
 
-#[derive(Debug)]
+const HEADER: &str =
+    r#"
+▗▄▄▖ ▗▖    ▗▄▄▖ ▗▖    ▗▄▖▗▖  ▗▖▗▄▄▄▖▗▄▄▖ 
+▐▌ ▐▌▐▌    ▐▌ ▐▌▐▌   ▐▌ ▐▌▝▚▞▘ ▐▌   ▐▌ ▐▌
+▐▛▀▘ ▐▌    ▐▛▀▘ ▐▌   ▐▛▀▜▌ ▐▌  ▐▛▀▀▘▐▛▀▚▖
+▐▌▗▄▄▞▘    ▐▌   ▐▙▄▄▖▐▌ ▐▌ ▐▌  ▐▙▄▄▖▐▌ ▐▌
+"#;
+
+use std::time::{ Duration, Instant };
+use std::error::Error;
+use std::io;
+use std::process::{ Command, Stdio, Child };
+use std::fs;
+use std::thread;
+use std::sync::{ Arc, Mutex };
+use ratatui::{ prelude::*, widgets::*, layout::{ Layout, Direction, Constraint } };
+use crossterm::{
+    event::{ self, Event, KeyCode, KeyModifiers },
+    terminal::{ disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen },
+    execute,
+};
+use reqwest::Client;
+use serde_json::Value;
+
+#[derive(Debug, Clone, PartialEq)]
 enum Source {
-    WWW,
     YouTube,
-    Spotify,
     InternetArchive,
 }
 
-#[async_trait::async_trait]
-trait SourceHandler {
-    async fn search(&self, query: &str) -> Result<Vec<(String, String, Source)>, Box<dyn std::error::Error>>;
-    fn download(&self, identifier: &str, title: &str) -> Result<(), Box<dyn std::error::Error>>;
-    fn stream(&self, identifier: &str) -> Result<(), Box<dyn std::error::Error>>;
+#[derive(PartialEq)]
+enum Mode {
+    Stream,
+    Download,
 }
 
-const CYAN: &str = "\x1b[36m";
-const RESET: &str = "\x1b[0m";
-const GREEN: &str = "\x1b[32m";
-
-#[async_trait::async_trait]
-impl SourceHandler for Source {
-    async fn search(&self, query: &str) -> Result<Vec<(String, String, Source)>, Box<dyn std::error::Error>> {
-        match self {
-            Source::WWW => {
-                let mut results = Vec::new();
-                if let Ok(mut youtube_results) = search_youtube(query).await {
-                    results.append(&mut youtube_results);
-                }
-                if let Ok(mut archive_results) = search_archive(query).await {
-                    results.append(&mut archive_results);
-                }
-                if results.is_empty() {
-                    Err("No results found".into())
-                } else {
-                    Ok(results)
-                }
-            }
-            Source::YouTube => search_youtube(query).await,
-            Source::Spotify => Err("Spotify search not implemented yet".into()),
-            Source::InternetArchive => search_archive(query).await,
-        }
-    }
-
-    fn download(&self, identifier: &str, title: &str) -> Result<(), Box<dyn std::error::Error>> {
-        match self {
-            Source::YouTube => download_youtube_audio(identifier, title),
-            Source::Spotify => Err("Spotify download not implemented yet".into()),
-            Source::InternetArchive => download_archive_audio(identifier, title),
-            Source::WWW => Err("WWW download not supported directly".into()),
-        }
-    }
-
-    fn stream(&self, identifier: &str) -> Result<(), Box<dyn std::error::Error>> {
-        match self {
-            Source::YouTube => stream_audio(identifier),
-            _ => Err("Streaming not implemented for this source".into()),
-        }
-    }
+#[derive(PartialEq)]
+enum View {
+    InitialSelection,
+    SearchInput,
+    SourceSelection,
+    SearchResults,
+    Streaming,
+    Downloading,
 }
 
-#[tokio::main]
-async fn main() {
-    dotenv::dotenv().ok();
-    let args: Vec<String> = env::args().collect();
-    let play_flag = args.contains(&"--play".to_string());
+#[derive(Debug, Clone)]
+struct SearchResult {
+    identifier: String,
+    title: String,
+    source: Source,
+}
 
-    let song_query = get_query_from_terminal();
-    println!("{} -------------------------------------------- {}", CYAN, RESET);
-    println!("{} Where would you like to search for the song? {}", CYAN, RESET);
-    println!("{}       (Press ENTER to default to WWW) {}",CYAN, RESET);
-    println!("{} -------------------------------------------- {}", CYAN, RESET);
+struct AppUi {
+    search_input: String,
+    search_results: Vec<SearchResult>,
+    selected_result_index: Option<usize>,
+    selected_source_index: usize,
+    source: Source,
+    current_view: View,
+    visualization_data: Arc<Mutex<Vec<u8>>>,
+    ffplay_process: Option<Child>,
+    mode: Option<Mode>,
+    download_status: Arc<Mutex<Option<String>>>, // Add this field
+}
 
-    println!("1. YouTube");
-    println!("2. Internet Archive");
-    // println!("3. Spotify");
-
-    let mut input = String::new();
-    io::stdin().read_line(&mut input).expect("Failed to read line");
-    let choice: usize = input.trim().parse().unwrap_or(4);
-
-    let source = match choice {
-        1 => Source::YouTube,
-        2 => Source::InternetArchive,
-        3 => Source::Spotify,
-        4 => Source::WWW,
-        _ => {
-            println!("Invalid choice");
-            return;
+impl AppUi {
+    fn new() -> Self {
+        AppUi {
+            search_input: String::new(),
+            search_results: Vec::new(),
+            selected_result_index: Some(0),
+            selected_source_index: 0,
+            source: Source::YouTube,
+            current_view: View::InitialSelection,
+            visualization_data: Arc::new(Mutex::new(vec![0; 10])),
+            ffplay_process: None,
+            mode: None,
+            download_status: Arc::new(Mutex::new(None)), // Initialize the field
         }
-    };
+    }
 
-    match source.search(&song_query).await {
-        Ok(results) => {
-            // println!("Found the following results:");
-            println!("--------------------------------------------");
-
-            for (i, (identifier, title, src)) in results.iter().enumerate() {
-                println!("{}. {} (ID: {}, Source: {:?})", i + 1, title, identifier, src);
+    async fn search(&mut self) -> Result<(), Box<dyn Error>> {
+        match self.source {
+            Source::YouTube => {
+                self.search_results = search_youtube(&self.search_input).await?;
             }
-            println!("--------------------------------------------");
-
-            println!("{} -------------------------------------------- {}", CYAN, RESET);
-            println!("{} Enter the number of the result you want to select: {}", CYAN, RESET);
-            println!("{} -------------------------------------------- {}", CYAN, RESET);
-
-            // println!("Enter the number of the result you want to select:");
-            let mut input = String::new();
-            io::stdin().read_line(&mut input).expect("Failed to read line");
-            let choice: usize = input.trim().parse().expect("Invalid input");
-
-            if choice > 0 && choice <= results.len() {
-                let (identifier, title, src) = &results[choice - 1];
-                if play_flag {
-                    println!("Streaming audio...");
-                    if let Err(e) = src.stream(identifier) {
-                        eprintln!("Error streaming audio: {}", e);
-                    }
-                } else {
-                    println!("Downloading audio...");
-                    if let Err(e) = src.download(identifier, title) {
-                        eprintln!("Error downloading audio: {}", e);
-                    } else {
-                        println!("Download complete!");
-                    }
-                }
-            } else {
-                println!("Invalid choice");
+            Source::InternetArchive => {
+                self.search_results = search_archive(&self.search_input).await?;
             }
         }
-        Err(e) => {
-            eprintln!("Error searching: {}", e);
+        self.current_view = View::SearchResults;
+        self.selected_result_index = Some(0);
+        Ok(())
+    }
+
+    fn stop_streaming(&mut self) {
+        if let Some(mut process) = self.ffplay_process.take() {
+            let _ = process.kill();
         }
     }
 }
 
+async fn search_youtube(query: &str) -> Result<Vec<SearchResult>, Box<dyn Error>> {
+    // Construct the yt-dlp command
+    let output = Command::new("yt-dlp")
+        .arg("--default-search")
+        .arg("ytsearch") // Specify YouTube search
+        .arg(format!("ytsearch15:{}", query)) // Fetch top 15 results
+        .arg("--dump-json") // Output results in JSON
+        .arg("--flat-playlist") // Skip detailed metadata
+        .arg("--skip-download") // Skip downloading anything
+        .arg("--ignore-errors") // Avoid delays from errors
+        .output()?; // Execute the command
 
-/// Searches for a song on YouTube using the YouTube Data API.
-async fn search_youtube(query: &str) -> Result<Vec<(String, String, Source)>, Box<dyn std::error::Error>> {
-    let api_key = "AIzaSyD9sc6z8J8I-imV-htavHTb1NP_q3EDcOY";  // Add your API key here
+    // Ensure the command was successful
+    if !output.status.success() {
+        return Err(
+            format!(
+                "yt-dlp failed with status: {:?}, stderr: {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr)
+            ).into()
+        );
+    }
+
+    // Parse the JSON output
+    let stdout = String::from_utf8(output.stdout)?;
+    let results: Vec<SearchResult> = stdout
+        .lines() // Parse each JSON line as a result
+        .filter_map(|line| {
+            // Parse the line as JSON
+            let json: Value = serde_json::from_str(line).ok()?;
+
+            // Extract relevant fields
+            Some(SearchResult {
+                identifier: json.get("id")?.as_str()?.to_string(),
+                title: json.get("title")?.as_str()?.to_string(),
+                source: Source::YouTube,
+            })
+        })
+        .collect();
+
+    Ok(results)
+}
+
+async fn search_archive(query: &str) -> Result<Vec<SearchResult>, Box<dyn Error>> {
     let url = format!(
-        "https://www.googleapis.com/youtube/v3/search?part=snippet&q={}&type=video&maxResults=10&key={}",
-        query, api_key
-    );
-
-    let client = Client::new();
-    let response = client.get(&url).send().await?;
-    let json: Value = response.json().await?;
-
-    let mut results = Vec::new();
-    if let Some(items) = json["items"].as_array() {
-        for item in items {
-            if let (Some(video_id), Some(title)) = (
-                item["id"]["videoId"].as_str(),
-                item["snippet"]["title"].as_str(),
-            ) {
-                results.push((video_id.to_string(), title.to_string(), Source::YouTube));
-            }
-        }
-    }
-
-    if results.is_empty() {
-        Err("No videos found".into())
-    } else {
-        Ok(results)
-    }
-}
-
-/// Searches for a song on Archive.org using the advanced search API.
-async fn search_archive(query: &str) -> Result<Vec<(String, String, Source)>, Box<dyn std::error::Error>> {
-    let url = format!(
-        "https://archive.org/advancedsearch.php?q={}&output=json",
+        "https://archive.org/advancedsearch.php?q={}&output=json&rows=15",
         query.replace(" ", "+")
     );
 
@@ -188,153 +159,611 @@ async fn search_archive(query: &str) -> Result<Vec<(String, String, Source)>, Bo
     let mut results = Vec::new();
     if let Some(items) = json["response"]["docs"].as_array() {
         for item in items {
-            if let Some(identifier) = item["identifier"].as_str() {
-                if let Some(title) = item["title"].as_str() {
-                    results.push((identifier.to_string(), title.to_string(), Source::InternetArchive));
-                }
+            if
+                let (Some(identifier), Some(title)) = (
+                    item["identifier"].as_str(),
+                    item["title"].as_str(),
+                )
+            {
+                results.push(SearchResult {
+                    identifier: identifier.to_string(),
+                    title: title.to_string(),
+                    source: Source::InternetArchive,
+                });
             }
         }
     }
 
-    if results.is_empty() {
-        Err("No tracks found".into())
-    } else {
-        Ok(results)
-    }
+    Ok(results)
 }
 
-/// Downloads the audio of a YouTube video using yt-dlp.
-fn download_youtube_audio(video_id: &str, title: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let download_path = "./";
-    fs::create_dir_all(download_path)?; // Ensure the directory exists
-
-    let sanitized_title = title.replace("/", "_").replace("\\", "_");
-    let output_path = format!("{}/{} (PJ-PLAYER).mp3", download_path, sanitized_title);
-    println!("Downloading audio to: {}", output_path);
-
-    // Using yt-dlp for download
-    let status = Command::new("yt-dlp")
-        .args(&[
-            "--extract-audio",
-            "--audio-format", "mp3",
-            "-o", &output_path,
-            &format!("https://www.youtube.com/watch?v={}", video_id),
-        ])
-        .status();
-
-    match status {
-        Ok(status) if status.success() => println!("Download completed successfully."),
-        Ok(status) => println!("yt-dlp returned an error: Exit code {}", status),
-        Err(err) => println!("Error executing yt-dlp: {}", err),
-    }
-
-    Ok(())
-}
-
-/// Downloads the audio of a track from Archive.org.
-fn download_archive_audio(identifier: &str, title: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let download_path = "./";
-    fs::create_dir_all(download_path)?; // Ensure the directory exists
-
-    let sanitized_title = title.replace("/", "_").replace("\\", "_");
-    let output_path = format!("{}/{} (PJ-PLAYER).mp3", download_path, sanitized_title);
-    let download_url = format!("https://archive.org/download/{}/{}", identifier, identifier);
-
-    println!("Downloading audio to: {}", output_path);
-
-    // Download file using `wget` or any preferred download tool
-    let status = Command::new("wget")
-        .args(&[
-            "-O", &output_path,
-            &download_url,
-        ])
-        .status();
-
-    match status {
-        Ok(status) if status.success() => println!("Download completed successfully."),
-        Ok(status) => println!("wget returned an error: Exit code {}", status),
-        Err(err) => println!("Error executing wget: {}", err),
-    }
-
-    Ok(())
-}
-
-/// Get the search query from the terminal arguments or user input.
-fn get_query_from_terminal() -> String {
-    // First, try to get the query from command line arguments
-    let args: Vec<String> = env::args().collect();
-    if args.len() > 1 {
-        return args[1].clone(); // Get the first argument as the search query
-    }
-
-    // If no arguments, prompt the user for the search query
-println!("Please enter the name of the song or artist you'd like to search for (e.g., 'Glorybox by Portishead' or 'Tool Sober'): ");
-    let mut query = String::new();
-    io::stdin()
-        .read_line(&mut query)
-        .expect("Failed to read line");
-    query.trim().to_string()
-}
-
-
-/// Streams the audio of a YouTube video using yt-dlp and ffplay.
-fn stream_audio(video_id: &str) -> Result<(), Box<dyn Error>> {
+// Removed duplicate render function
+fn stream_audio(
+    video_id: &str,
+    visualization_data: Arc<Mutex<Vec<u8>>>
+) -> Result<Child, Box<dyn Error>> {
     let youtube_url = format!("https://www.youtube.com/watch?v={}", video_id);
 
-    // Get the song name from yt-dlp using a query to extract metadata (e.g., title)
-    let output = Command::new("yt-dlp")
-        .args(&[
-            "-s",             // Simulate download (don't download actual content)
-            "--get-title",    // Get the title of the video (song name)
-            &youtube_url,
-        ])
-        .output()?;  // Capture output
+    let output = Command::new("yt-dlp").args(&["-s", "--get-title", &youtube_url]).output()?;
 
-    // Extract the song name from the command output
     let song_name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    println!("Streaming: {}", song_name);
 
-    // Display a message about the song being streamed
-    println!("\n{} ~ {:?} IS STREAMING... {}", GREEN, song_name, RESET);
-    
-    // Spawn a thread to run Cava visualizer
-    let cava_thread = thread::spawn(|| {
-        Command::new("cava")
-            .stdout(Stdio::inherit())  // Direct Cava output to the terminal
-            .stderr(Stdio::inherit())
-            .status()
-            .expect("Failed to start Cava");
+    let yt_dlp = Command::new("yt-dlp")
+        .args(&["-o", "-", "-f", "bestaudio", "--quiet", &youtube_url])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()?;
+
+    let ffplay_stdin = yt_dlp.stdout.unwrap();
+    let visualization_data_clone = Arc::clone(&visualization_data);
+
+    let ffplay = Command::new("ffplay")
+        .args(&["-nodisp", "-autoexit", "-loglevel", "quiet", "-"])
+        .stdin(ffplay_stdin)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
+
+    let ffplay_id = ffplay.id();
+
+    thread::spawn(move || {
+        while
+            Command::new("ps")
+                .arg("-p")
+                .arg(ffplay_id.to_string())
+                .output()
+                .unwrap()
+                .status.success()
+        {
+            let mut data = visualization_data_clone.lock().unwrap();
+            for v in data.iter_mut() {
+                *v = rand::random::<u8>() % 10;
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
     });
 
-    // Stream audio directly using yt-dlp and ffplay
-    let yt_dlp = Command::new("yt-dlp")
-        .args(&[
-            "-o", "-",           // Output to stdout
-            "-f", "bestaudio",   // Choose the best audio stream
-            "--quiet",           // Suppress unnecessary output from yt-dlp
-            &youtube_url,
-        ])
-        .stdout(Stdio::piped())    // Pipe yt-dlp output to ffplay
-        .stderr(Stdio::null())     // Suppress stderr from yt-dlp
-        .spawn()?;                 // Spawn the yt-dlp process
+    Ok(ffplay)
+}
 
-    // Run ffplay with minimal output
-    let status = Command::new("ffplay")
-        .args(&[
-            "-nodisp",           // Disable video display
-            "-autoexit",         // Exit when audio finishes
-            "-loglevel", "quiet", // Suppress other ffplay output
-            "-",
-        ])
-        .stdin(yt_dlp.stdout.unwrap())  // Pass yt-dlp's stdout to ffplay's stdin
-        .stdout(Stdio::null())           // Suppress ffplay's stdout
-        .stderr(Stdio::null())           // Suppress ffplay's stderr
-        .status()?;                      // Wait for the ffplay process to finish
-
-    // Wait for the Cava thread to finish (if ffplay ends first)
-    if status.success() {
-        cava_thread.join().ok(); // Gracefully stop Cava
-        Ok(())
-    } else {
-        Err(format!("ffplay exited with status: {}", status).into())
+fn download_youtube_audio(
+    video_id: String,
+    title: String,
+    download_status: Arc<Mutex<Option<String>>>
+) {
+    let status_message = format!("{} is downloading", title);
+    {
+        let mut status = download_status.lock().unwrap();
+        *status = Some(status_message);
     }
+
+    thread::spawn(move || {
+        let download_path = "./";
+        fs::create_dir_all(download_path).unwrap();
+
+        let sanitized_title = title.replace("/", "_").replace("\\", "_");
+        let output_path = format!("{}/{} (PJ-PLAYER).mp3", download_path, sanitized_title);
+
+        let status = Command::new("yt-dlp")
+            .args(
+                &[
+                    "--extract-audio",
+                    "--audio-format",
+                    "mp3",
+                    "-o",
+                    &output_path,
+                    &format!("https://www.youtube.com/watch?v={}", video_id),
+                ]
+            )
+            .stdout(Stdio::null()) // Suppress standard output
+            .stderr(Stdio::null()) // Suppress standard error
+            .status();
+
+        let mut status_message = download_status.lock().unwrap();
+        *status_message = match status {
+            Ok(status) if status.success() => Some(format!("{} downloaded successfully", title)),
+            Ok(status) => Some(format!("yt-dlp returned an error: Exit code {}", status)),
+            Err(err) => Some(format!("Error executing yt-dlp: {}", err)),
+        };
+    });
+}
+
+fn download_archive_audio(
+    identifier: String,
+    title: String,
+    download_status: Arc<Mutex<Option<String>>>
+) {
+    let status_message = format!("{} is downloading", title);
+    {
+        let mut status = download_status.lock().unwrap();
+        *status = Some(status_message);
+    }
+
+    thread::spawn(move || {
+        let download_path = "./";
+        fs::create_dir_all(download_path).unwrap();
+
+        let sanitized_title = title.replace("/", "_").replace("\\", "_");
+        let output_path = format!("{}/{} (PJ-PLAYER).mp3", download_path, sanitized_title);
+        let download_url = format!("https://archive.org/download/{}/{}", identifier, identifier);
+
+        let status = Command::new("wget")
+            .args(&["-O", &output_path, &download_url])
+            .stdout(Stdio::null()) // Suppress standard output
+            .stderr(Stdio::null()) // Suppress standard error
+            .status();
+
+        let mut status_message = download_status.lock().unwrap();
+        *status_message = match status {
+            Ok(status) if status.success() => Some(format!("{} downloaded successfully", title)),
+            Ok(status) => Some(format!("wget returned an error: Exit code {}", status)),
+            Err(err) => Some(format!("Error executing wget: {}", err)),
+        };
+    });
+}
+
+fn render(app: &AppUi, frame: &mut Frame) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(5), // Header
+            Constraint::Length(1), // Second header
+            Constraint::Min(10), // Main content
+        ])
+        .split(frame.area());
+
+    let light_green_style = Style::default().fg(Color::LightGreen);
+    let white_style = Style::default().fg(Color::White);
+
+    let header_paragraph = Paragraph::new(HEADER)
+        .style(light_green_style)
+        .alignment(Alignment::Center); // Center the text
+    frame.render_widget(header_paragraph, chunks[0]);
+
+    let second_header_paragraph = Paragraph::new("made with <3 by Pocket Jack")
+        .style(white_style)
+        .alignment(Alignment::Center); // Center the text
+    frame.render_widget(second_header_paragraph, chunks[1]);
+
+    match app.current_view {
+        View::InitialSelection => {
+            let buttons = vec!["1. DOWNLOAD", "2. STREAM"];
+            let items: Vec<ListItem> = buttons
+                .iter()
+                .enumerate()
+                .map(|(i, &button)| {
+                    let style = if Some(i) == app.selected_result_index {
+                        Style::default().bg(Color::Blue).fg(Color::White)
+                    } else {
+                        white_style
+                    };
+                    ListItem::new(button).style(style)
+                })
+                .collect();
+
+            let list = List::new(items).block(
+                Block::default().borders(Borders::ALL).title("Select Mode").style(light_green_style)
+            );
+
+            frame.render_widget(list, chunks[2]);
+        }
+        View::SearchInput => {
+            let input_block = Block::default()
+                .borders(Borders::ALL)
+                .title("Search Music")
+                .style(light_green_style);
+
+            let input_text = format!("(Enter Your Search Query): {}", app.search_input);
+
+            let input = Paragraph::new(input_text).style(white_style).block(input_block);
+
+            // Adjust constraints to make the search input section smaller
+            let search_chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(3), // Smaller height for search input
+                    Constraint::Min(10),
+                ])
+                .split(chunks[2]);
+
+            frame.render_widget(input, search_chunks[0]);
+        }
+        View::SourceSelection => {
+            let sources = vec!["1. YouTube", "2. Internet Archive"];
+            let items: Vec<ListItem> = sources
+                .iter()
+                .enumerate()
+                .map(|(i, &source)| {
+                    let style = if i == app.selected_source_index {
+                        Style::default().bg(Color::Blue).fg(Color::White)
+                    } else {
+                        white_style
+                    };
+                    ListItem::new(source).style(style)
+                })
+                .collect();
+
+            let list = List::new(items).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Select Source")
+                    .style(light_green_style)
+            );
+
+            frame.render_widget(list, chunks[2]);
+        }
+        View::SearchResults => {
+            // Clear the download status message when switching to SearchResults view
+            {
+                let mut download_status = app.download_status.lock().unwrap();
+                *download_status = None;
+            }
+
+            if app.search_results.is_empty() {
+                let no_results_item = ListItem::new("NO MUSIC FOUND =(").style(white_style).bold();
+                let no_results_list = List::new(vec![no_results_item]).block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title("Search Results")
+                        .style(light_green_style)
+                );
+                frame.render_widget(no_results_list, chunks[2]);
+            } else {
+                let results: Vec<ListItem> = app.search_results
+                    .iter()
+                    .enumerate()
+                    .map(|(i, result)| {
+                        let style = if Some(i) == app.selected_result_index {
+                            Style::default().bg(Color::Blue).fg(Color::White)
+                        } else {
+                            white_style
+                        };
+
+                        let content = Line::from(
+                            vec![
+                                Span::raw(format!("{}: ", i + 1)),
+                                Span::raw(&result.title),
+                                Span::raw(format!(" ({:?})", result.source))
+                            ]
+                        );
+                        ListItem::new(content).style(style)
+                    })
+                    .collect();
+
+                let list = List::new(results).block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title("Search Results")
+                        .style(light_green_style)
+                );
+
+                frame.render_widget(list, chunks[2]);
+            }
+        }
+        View::Streaming => {
+            let streaming_chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Percentage(14), // Adjust the percentage to make the blocks closer
+                    Constraint::Percentage(50), //
+                ])
+                .split(chunks[2]);
+
+            let song_block = Block::default()
+                .borders(Borders::ALL)
+                .title("Now Streaming")
+                .style(light_green_style);
+
+            // Assuming `app.search_results` contains the current streaming song
+            let song_name = if let Some(index) = app.selected_result_index {
+                &app.search_results[index].title
+            } else {
+                "Unknown Song"
+            };
+
+            let song_info = Paragraph::new(song_name)
+                .style(white_style)
+                .block(song_block)
+                .alignment(Alignment::Center); // Center the text horizontally
+
+            frame.render_widget(song_info, streaming_chunks[0]);
+
+            let eq_area = streaming_chunks[1];
+            let eq_data = app.visualization_data.lock().unwrap();
+
+            let max_height = (eq_area.height as usize).min(10); // Shorter height
+            let bar_width = (eq_area.width as usize) / eq_data.len(); // Adjust bar width calculation
+            let visual_block = Block::default()
+                .borders(Borders::ALL)
+                .title("Visual")
+                .style(Style::default().fg(Color::LightGreen));
+
+            frame.render_widget(visual_block.clone(), eq_area);
+
+            let inner_area = visual_block.inner(eq_area);
+
+            for (i, &value) in eq_data.iter().enumerate() {
+                let bar_height = (((value as f64) / 10.0) * (max_height as f64)).round() as usize;
+                let x = inner_area.x + ((i * bar_width) as u16);
+                let y = inner_area.y + inner_area.height - (bar_height as u16);
+
+                for j in 0..bar_height {
+                    let y_pos = y + (j as u16);
+                    let bar = Block::default().style(Style::default().bg(Color::Green));
+                    frame.render_widget(bar, Rect::new(x, y_pos, bar_width as u16, 1));
+                }
+            }
+        }
+        View::Downloading => {
+            let download_status = app.download_status.lock().unwrap();
+            let status_message = download_status.as_deref().unwrap_or("No downloads in progress");
+
+            let download_block = Block::default()
+                .borders(Borders::ALL)
+                .title("Downloads")
+                .style(light_green_style);
+
+            let download_paragraph = Paragraph::new(status_message)
+                .style(white_style)
+                .block(download_block)
+                .alignment(Alignment::Center);
+
+            frame.render_widget(download_paragraph, chunks[2]);
+        }
+    }
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
+    enable_raw_mode()?;
+    let mut stdout = io::stdout();
+    execute!(stdout, EnterAlternateScreen)?;
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
+
+    let mut app = AppUi::new();
+    let tick_rate = Duration::from_millis(250);
+    let mut last_tick = Instant::now();
+
+    loop {
+        terminal.draw(|frame| render(&app, frame))?;
+
+        let timeout = tick_rate
+            .checked_sub(last_tick.elapsed())
+            .unwrap_or_else(|| Duration::from_secs(0));
+
+        if crossterm::event::poll(timeout)? {
+            if let Event::Key(key) = event::read()? {
+                match app.current_view {
+                    View::InitialSelection => {
+                        match key.code {
+                            KeyCode::Up => {
+                                app.selected_result_index = Some(
+                                    app.selected_result_index.unwrap_or(0).saturating_sub(1)
+                                );
+                            }
+                            KeyCode::Down => {
+                                app.selected_result_index = Some(
+                                    (app.selected_result_index.unwrap_or(0) + 1).min(1)
+                                );
+                            }
+                            KeyCode::Enter => {
+                                match app.selected_result_index {
+                                    Some(0) => {
+                                        app.mode = Some(Mode::Download);
+                                        app.current_view = View::SearchInput;
+                                    }
+                                    Some(1) => {
+                                        app.mode = Some(Mode::Stream);
+                                        app.source = Source::YouTube; // Set source to YouTube for streaming
+                                        app.current_view = View::SearchInput;
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    View::SearchInput => {
+                        match key.code {
+                            KeyCode::Enter => {
+                                if app.mode == Some(Mode::Stream) {
+                                    app.search().await?;
+                                } else {
+                                    app.current_view = View::SourceSelection;
+                                }
+                            }
+                            KeyCode::Char(c) => {
+                                app.search_input.push(c);
+                            }
+                            KeyCode::Backspace => {
+                                app.search_input.pop();
+                            }
+                            KeyCode::Left => {
+                                app.current_view = View::InitialSelection;
+                            }
+                            KeyCode::Right => {
+                                if app.mode == Some(Mode::Stream) {
+                                    app.search().await?;
+                                } else {
+                                    app.current_view = View::SourceSelection;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    View::SourceSelection => {
+                        match key.code {
+                            KeyCode::Up => {
+                                app.selected_source_index =
+                                    app.selected_source_index.saturating_sub(1);
+                            }
+                            KeyCode::Down => {
+                                app.selected_source_index = (app.selected_source_index + 1).min(1);
+                            }
+                            KeyCode::Enter => {
+                                app.source = match app.selected_source_index {
+                                    0 => Source::YouTube,
+                                    _ => Source::InternetArchive,
+                                };
+                                app.search().await?;
+                            }
+                            KeyCode::Left => {
+                                app.current_view = View::SearchInput;
+                            }
+                            KeyCode::Right => {
+                                app.source = match app.selected_source_index {
+                                    0 => Source::YouTube,
+                                    _ => Source::InternetArchive,
+                                };
+                                app.search().await?;
+                            }
+                            _ => {}
+                        }
+                    }
+                    View::SearchResults => {
+                        match key.code {
+                            KeyCode::Up => {
+                                if let Some(idx) = &mut app.selected_result_index {
+                                    if *idx == 0 {
+                                        app.current_view = View::SearchInput;
+                                    } else {
+                                        *idx = idx.saturating_sub(1);
+                                    }
+                                }
+                            }
+                            KeyCode::Down => {
+                                if let Some(mut idx) = app.selected_result_index {
+                                    idx = (idx + 1).min(app.search_results.len() - 1);
+                                    app.selected_result_index = Some(idx);
+                                }
+                            }
+                            KeyCode::Enter => {
+                                if let Some(index) = app.selected_result_index {
+                                    let selected = &app.search_results[index];
+                                    match app.mode {
+                                        Some(Mode::Stream) => {
+                                            app.current_view = View::Streaming;
+                                            let identifier = selected.identifier.clone();
+                                            let visualization_data = Arc::clone(
+                                                &app.visualization_data
+                                            );
+                                            let ffplay_process = stream_audio(
+                                                &identifier,
+                                                visualization_data
+                                            )?;
+                                            app.ffplay_process = Some(ffplay_process);
+                                        }
+                                        Some(Mode::Download) => {
+                                            app.current_view = View::Downloading; // Switch to Downloading view
+                                            match app.source {
+                                                Source::YouTube => {
+                                                    download_youtube_audio(
+                                                        selected.identifier.clone(),
+                                                        selected.title.clone(),
+                                                        Arc::clone(&app.download_status)
+                                                    );
+                                                }
+                                                Source::InternetArchive => {
+                                                    download_archive_audio(
+                                                        selected.identifier.clone(),
+                                                        selected.title.clone(),
+                                                        Arc::clone(&app.download_status)
+                                                    );
+                                                }
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                            KeyCode::Left => {
+                                app.current_view = View::SourceSelection;
+                            }
+                            KeyCode::Right => {
+                                if let Some(index) = app.selected_result_index {
+                                    let selected = &app.search_results[index];
+                                    match app.mode {
+                                        Some(Mode::Stream) => {
+                                            app.current_view = View::Streaming;
+                                            let identifier = selected.identifier.clone();
+                                            let visualization_data = Arc::clone(
+                                                &app.visualization_data
+                                            );
+                                            let ffplay_process = stream_audio(
+                                                &identifier,
+                                                visualization_data
+                                            )?;
+                                            app.ffplay_process = Some(ffplay_process);
+                                        }
+                                        Some(Mode::Download) => {
+                                            app.current_view = View::Downloading; // Switch to Downloading view
+                                            match app.source {
+                                                Source::YouTube => {
+                                                    download_youtube_audio(
+                                                        selected.identifier.clone(),
+                                                        selected.title.clone(),
+                                                        Arc::clone(&app.download_status)
+                                                    );
+                                                }
+                                                Source::InternetArchive => {
+                                                    download_archive_audio(
+                                                        selected.identifier.clone(),
+                                                        selected.title.clone(),
+                                                        Arc::clone(&app.download_status)
+                                                    );
+                                                }
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    View::Streaming => {
+                        if key.code == KeyCode::Esc {
+                            app.stop_streaming();
+                            app.current_view = View::SearchResults;
+                        } else if key.code == KeyCode::Left {
+                            app.stop_streaming();
+                            app.current_view = View::SearchResults;
+                        }
+                    }
+                    View::Downloading => {
+                        if key.code == KeyCode::Left {
+                            app.current_view = View::SearchResults;
+                            let mut download_status = app.download_status.lock().unwrap();
+                            *download_status = None; // Clear the download status message
+                        } else if key.code == KeyCode::Esc {
+                            app.current_view = View::SearchResults;
+                            let mut download_status = app.download_status.lock().unwrap();
+                            *download_status = None; // Clear the download status message
+                        }
+                    }
+                }
+
+                if
+                    key.code == KeyCode::Esc ||
+                    (key.code == KeyCode::Char('c') &&
+                        key.modifiers.contains(KeyModifiers::CONTROL))
+                {
+                    app.stop_streaming();
+                    break;
+                }
+            }
+        }
+
+        if last_tick.elapsed() >= tick_rate {
+            last_tick = Instant::now();
+        }
+    }
+
+    disable_raw_mode()?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    terminal.show_cursor()?;
+
+    Ok(())
 }
