@@ -321,7 +321,7 @@ fn render(app: &AppUi, frame: &mut Frame) {
         .alignment(Alignment::Center); // Center the text
     frame.render_widget(header_paragraph, chunks[0]);
 
-    let second_header_paragraph = Paragraph::new("made with <3 by Pocket Jack")
+    let second_header_paragraph = Paragraph::new("Made with ❤️ by Pocket Jack")
         .style(white_style)
         .alignment(Alignment::Center); // Center the text
     frame.render_widget(second_header_paragraph, chunks[1]);

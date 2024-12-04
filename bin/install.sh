@@ -18,12 +18,5 @@ sudo apt-get install -y wget
 echo "Installing ffmpeg..."
 sudo apt install -y ffmpeg
 
-# Install Cava
-echo "Installing Cava..."
-sudo apt-get install -y cava
-
-# Install dotenv crate
-# echo "Installing dotenv crate..."
-# cargo install dotenv
 
 echo "All dependencies installed successfully."
