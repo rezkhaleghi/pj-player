@@ -1,0 +1,7 @@
+{
+  "editor.defaultFormatter": "jinxdash.prettier-rust",
+  "notebook.defaultFormatter": "jinxdash.prettier-rust",
+  "editor.formatOnSave": true,
+  "editor.formatOnPaste": true,
+  "notebook.formatOnSave.enabled": true
+}

@@ -77,10 +77,10 @@ To use [`PJ-Player`]
    ![Project Demo](/demos/3-select.jpeg)
 
 5. **Stream Or Download The Content**:
-   - Stream
-     ![Project Demo](/demos/4-stream.jpeg)
-   - Download
-     ![Project Demo](/demos/5-dl.jpeg)
+- Stream
+   ![Project Demo](/demos/4-stream.jpeg)
+- Download
+   ![Project Demo](/demos/5-dl.jpeg)
 
 ## Contributing
 

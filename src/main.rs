@@ -15,6 +15,7 @@ use std::process::{ Command, Stdio, Child };
 use std::fs;
 use std::thread;
 use std::sync::{ Arc, Mutex };
+
 use ratatui::{ prelude::*, widgets::*, layout::{ Layout, Direction, Constraint } };
 use crossterm::{
     event::{ self, Event, KeyCode, KeyModifiers },
@@ -63,7 +64,7 @@ struct AppUi {
     visualization_data: Arc<Mutex<Vec<u8>>>,
     ffplay_process: Option<Child>,
     mode: Option<Mode>,
-    download_status: Arc<Mutex<Option<String>>>, // Add this field
+    download_status: Arc<Mutex<Option<String>>>,
 }
 
 impl AppUi {
@@ -78,7 +79,7 @@ impl AppUi {
             visualization_data: Arc::new(Mutex::new(vec![0; 10])),
             ffplay_process: None,
             mode: None,
-            download_status: Arc::new(Mutex::new(None)), // Initialize the field
+            download_status: Arc::new(Mutex::new(None)),
         }
     }
 
