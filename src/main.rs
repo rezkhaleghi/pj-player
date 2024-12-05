@@ -7,6 +7,10 @@ const HEADER: &str =
 ▐▛▀▘ ▐▌    ▐▛▀▘ ▐▌   ▐▛▀▜▌ ▐▌  ▐▛▀▀▘▐▛▀▚▖
 ▐▌▗▄▄▞▘    ▐▌   ▐▙▄▄▖▐▌ ▐▌ ▐▌  ▐▙▄▄▖▐▌ ▐▌
 "#;
+const YT_DLP_PATH: &str = "./bin/yt-dlp";
+const WGET_PATH: &str = "./bin/wget";
+// const FFMPEG_PATH: &str = "./bin/ffmpeg";
+const FFMPEG_PATH: &str = "ffplay";
 
 use std::time::{ Duration, Instant };
 use std::error::Error;
@@ -106,7 +110,7 @@ impl AppUi {
 
 async fn search_youtube(query: &str) -> Result<Vec<SearchResult>, Box<dyn Error>> {
     // Construct the yt-dlp command
-    let output = Command::new("yt-dlp")
+    let output = Command::new(YT_DLP_PATH)
         .arg("--default-search")
         .arg("ytsearch") // Specify YouTube search
         .arg(format!("ytsearch15:{}", query)) // Fetch top 15 results
@@ -185,12 +189,12 @@ fn stream_audio(
 ) -> Result<Child, Box<dyn Error>> {
     let youtube_url = format!("https://www.youtube.com/watch?v={}", video_id);
 
-    let output = Command::new("yt-dlp").args(&["-s", "--get-title", &youtube_url]).output()?;
+    let output = Command::new(YT_DLP_PATH).args(&["-s", "--get-title", &youtube_url]).output()?;
 
     let song_name = String::from_utf8_lossy(&output.stdout).trim().to_string();
     println!("Streaming: {}", song_name);
 
-    let yt_dlp = Command::new("yt-dlp")
+    let yt_dlp = Command::new(YT_DLP_PATH)
         .args(&["-o", "-", "-f", "bestaudio", "--quiet", &youtube_url])
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -199,7 +203,7 @@ fn stream_audio(
     let ffplay_stdin = yt_dlp.stdout.unwrap();
     let visualization_data_clone = Arc::clone(&visualization_data);
 
-    let ffplay = Command::new("ffplay")
+    let ffplay = Command::new(FFMPEG_PATH)
         .args(&["-nodisp", "-autoexit", "-loglevel", "quiet", "-"])
         .stdin(ffplay_stdin)
         .stdout(Stdio::null())
@@ -246,7 +250,7 @@ fn download_youtube_audio(
         let sanitized_title = title.replace("/", "_").replace("\\", "_");
         let output_path = format!("{}/{} (PJ-PLAYER).mp3", download_path, sanitized_title);
 
-        let status = Command::new("yt-dlp")
+        let status = Command::new(YT_DLP_PATH)
             .args(
                 &[
                     "--extract-audio",
@@ -289,7 +293,7 @@ fn download_archive_audio(
         let output_path = format!("{}/{} (PJ-PLAYER).mp3", download_path, sanitized_title);
         let download_url = format!("https://archive.org/download/{}/{}", identifier, identifier);
 
-        let status = Command::new("wget")
+        let status = Command::new(WGET_PATH)
             .args(&["-O", &output_path, &download_url])
             .stdout(Stdio::null()) // Suppress standard output
             .stderr(Stdio::null()) // Suppress standard error
