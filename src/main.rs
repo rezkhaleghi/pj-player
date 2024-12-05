@@ -1,12 +1,5 @@
 // Hello Friend :)
 
-const HEADER: &str =
-    r#"
-▗▄▄▖ ▗▖    ▗▄▄▖ ▗▖    ▗▄▖▗▖  ▗▖▗▄▄▄▖▗▄▄▖ 
-▐▌ ▐▌▐▌    ▐▌ ▐▌▐▌   ▐▌ ▐▌▝▚▞▘ ▐▌   ▐▌ ▐▌
-▐▛▀▘ ▐▌    ▐▛▀▘ ▐▌   ▐▛▀▜▌ ▐▌  ▐▛▀▀▘▐▛▀▚▖
-▐▌▗▄▄▞▘    ▐▌   ▐▙▄▄▖▐▌ ▐▌ ▐▌  ▐▙▄▄▖▐▌ ▐▌
-"#;
 // const YT_DLP_PATH: &str = "./bin/yt-dlp";
 // const WGET_PATH: &str = "./bin/wget";
 // const FFMPEG_PATH: &str = "./bin/ffmpeg";
@@ -21,6 +14,8 @@ use std::process::{ Command, Stdio, Child };
 use std::fs;
 use std::thread;
 use std::sync::{ Arc, Mutex };
+use std::fs::File;
+use std::io::Read;
 
 use ratatui::{ prelude::*, widgets::*, layout::{ Layout, Direction, Constraint } };
 use crossterm::{
@@ -28,9 +23,9 @@ use crossterm::{
     terminal::{ disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen },
     execute,
 };
+
 use reqwest::Client;
 use serde_json::Value;
-
 #[derive(Debug, Clone, PartialEq)]
 enum Source {
     YouTube,
@@ -43,6 +38,7 @@ enum Mode {
     Download,
 }
 
+// represent the current view of the application
 #[derive(PartialEq)]
 enum View {
     InitialSelection,
@@ -53,6 +49,7 @@ enum View {
     Downloading,
 }
 
+// represent a search result
 #[derive(Debug, Clone)]
 struct SearchResult {
     identifier: String,
@@ -60,6 +57,7 @@ struct SearchResult {
     source: Source,
 }
 
+// represent the UI state of the application
 struct AppUi {
     search_input: String,
     search_results: Vec<SearchResult>,
@@ -89,15 +87,12 @@ impl AppUi {
         }
     }
 
+    // Method to perform a search based on the current source
     async fn search(&mut self) -> Result<(), Box<dyn Error>> {
-        match self.source {
-            Source::YouTube => {
-                self.search_results = search_youtube(&self.search_input).await?;
-            }
-            Source::InternetArchive => {
-                self.search_results = search_archive(&self.search_input).await?;
-            }
-        }
+        self.search_results = match self.source {
+            Source::YouTube => search_youtube(&self.search_input).await?,
+            Source::InternetArchive => search_archive(&self.search_input).await?,
+        };
         self.current_view = View::SearchResults;
         self.selected_result_index = Some(0);
         Ok(())
@@ -110,6 +105,7 @@ impl AppUi {
     }
 }
 
+// search on YouTube using yt-dlp
 async fn search_youtube(query: &str) -> Result<Vec<SearchResult>, Box<dyn Error>> {
     // Construct the yt-dlp command
     let output = Command::new(YT_DLP_PATH)
@@ -153,16 +149,19 @@ async fn search_youtube(query: &str) -> Result<Vec<SearchResult>, Box<dyn Error>
     Ok(results)
 }
 
+// search audio on archive.org
 async fn search_archive(query: &str) -> Result<Vec<SearchResult>, Box<dyn Error>> {
     let url = format!(
         "https://archive.org/advancedsearch.php?q={}&output=json&rows=15",
         query.replace(" ", "+")
     );
 
+    // Send the request and parse the response
     let client = Client::new();
     let response = client.get(&url).send().await?;
     let json: Value = response.json().await?;
 
+    // Extract search results from the response
     let mut results = Vec::new();
     if let Some(items) = json["response"]["docs"].as_array() {
         for item in items {
@@ -184,37 +183,36 @@ async fn search_archive(query: &str) -> Result<Vec<SearchResult>, Box<dyn Error>
     Ok(results)
 }
 
-// Removed duplicate render function
+// stream audio using yt-dlp and ffplay
+
 fn stream_audio(
     video_id: &str,
     visualization_data: Arc<Mutex<Vec<u8>>>
 ) -> Result<Child, Box<dyn Error>> {
     let youtube_url = format!("https://www.youtube.com/watch?v={}", video_id);
-
+    // Get the title of the video
     let output = Command::new(YT_DLP_PATH).args(&["-s", "--get-title", &youtube_url]).output()?;
-
     let song_name = String::from_utf8_lossy(&output.stdout).trim().to_string();
     println!("Streaming: {}", song_name);
-
+    // Start yt-dlp to stream audio
     let yt_dlp = Command::new(YT_DLP_PATH)
         .args(&["-o", "-", "-f", "bestaudio", "--quiet", &youtube_url])
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()?;
-
+    // Start ffplay to play the audio
     let ffplay_stdin = yt_dlp.stdout.unwrap();
     let visualization_data_clone = Arc::clone(&visualization_data);
-
     let ffplay = Command::new(FFMPEG_PATH)
         .args(&["-nodisp", "-autoexit", "-loglevel", "quiet", "-"])
         .stdin(ffplay_stdin)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()?;
-
+    // Spawn a thread to update visualization data
     let ffplay_id = ffplay.id();
-
     thread::spawn(move || {
+        let mut file = File::open("/dev/urandom").unwrap();
         while
             Command::new("ps")
                 .arg("-p")
@@ -225,33 +223,38 @@ fn stream_audio(
         {
             let mut data = visualization_data_clone.lock().unwrap();
             for v in data.iter_mut() {
-                *v = rand::random::<u8>() % 10;
+                let mut buf = [0u8; 1];
+                file.read_exact(&mut buf).unwrap();
+                *v = buf[0] % 10;
             }
             thread::sleep(Duration::from_millis(100));
         }
     });
-
     Ok(ffplay)
 }
-
+// download YouTube audio using yt-dlp
 fn download_youtube_audio(
     video_id: String,
     title: String,
     download_status: Arc<Mutex<Option<String>>>
 ) {
+    // Update download status
     let status_message = format!("{} is downloading", title);
     {
         let mut status = download_status.lock().unwrap();
         *status = Some(status_message);
     }
 
+    // Spawn a thread to perform the download
     thread::spawn(move || {
         let download_path = "./";
         fs::create_dir_all(download_path).unwrap();
 
+        // Sanitize the title for the file name
         let sanitized_title = title.replace("/", "_").replace("\\", "_");
         let output_path = format!("{}/{} (PJ-PLAYER).mp3", download_path, sanitized_title);
 
+        // Execute yt-dlp to download the audio
         let status = Command::new(YT_DLP_PATH)
             .args(
                 &[
@@ -267,6 +270,7 @@ fn download_youtube_audio(
             .stderr(Stdio::null()) // Suppress standard error
             .status();
 
+        // Update download status based on the result
         let mut status_message = download_status.lock().unwrap();
         *status_message = match status {
             Ok(status) if status.success() => Some(format!("{} downloaded successfully", title)),
@@ -276,31 +280,37 @@ fn download_youtube_audio(
     });
 }
 
+// download audio using wget from archive.org
 fn download_archive_audio(
     identifier: String,
     title: String,
     download_status: Arc<Mutex<Option<String>>>
 ) {
+    // Update download status
     let status_message = format!("{} is downloading", title);
     {
         let mut status = download_status.lock().unwrap();
         *status = Some(status_message);
     }
 
+    // Spawn a thread to perform the download
     thread::spawn(move || {
         let download_path = "./";
         fs::create_dir_all(download_path).unwrap();
 
+        // Sanitize the title for the file name
         let sanitized_title = title.replace("/", "_").replace("\\", "_");
         let output_path = format!("{}/{} (PJ-PLAYER).mp3", download_path, sanitized_title);
         let download_url = format!("https://archive.org/download/{}/{}", identifier, identifier);
 
+        // Execute wget to download the audio
         let status = Command::new(WGET_PATH)
             .args(&["-O", &output_path, &download_url])
             .stdout(Stdio::null()) // Suppress standard output
             .stderr(Stdio::null()) // Suppress standard error
             .status();
 
+        // Update download status based on the result
         let mut status_message = download_status.lock().unwrap();
         *status_message = match status {
             Ok(status) if status.success() => Some(format!("{} downloaded successfully", title)),
@@ -310,6 +320,7 @@ fn download_archive_audio(
     });
 }
 
+//  render ui
 fn render(app: &AppUi, frame: &mut Frame) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -323,7 +334,14 @@ fn render(app: &AppUi, frame: &mut Frame) {
     let light_green_style = Style::default().fg(Color::LightGreen);
     let white_style = Style::default().fg(Color::White);
 
-    let header_paragraph = Paragraph::new(HEADER)
+    let header_paragraph = Paragraph::new(
+        r#"
+▗▄▄▖ ▗▖    ▗▄▄▖ ▗▖    ▗▄▖▗▖  ▗▖▗▄▄▄▖▗▄▄▖ 
+▐▌ ▐▌▐▌    ▐▌ ▐▌▐▌   ▐▌ ▐▌▝▚▞▘ ▐▌   ▐▌ ▐▌
+▐▛▀▘ ▐▌    ▐▛▀▘ ▐▌   ▐▛▀▜▌ ▐▌  ▐▛▀▀▘▐▛▀▚▖
+▐▌▗▄▄▞▘    ▐▌   ▐▙▄▄▖▐▌ ▐▌ ▐▌  ▐▙▄▄▖▐▌ ▐▌
+"#
+    )
         .style(light_green_style)
         .alignment(Alignment::Center); // Center the text
     frame.render_widget(header_paragraph, chunks[0]);
@@ -497,7 +515,10 @@ fn render(app: &AppUi, frame: &mut Frame) {
 
                 for j in 0..bar_height {
                     let y_pos = y + (j as u16);
-                    let bar = Block::default().style(Style::default().bg(Color::Green));
+                    let char = if j % 2 == 0 { '|' } else { ' ' };
+                    let bar = Paragraph::new(char.to_string())
+                        .style(Style::default().fg(Color::Green))
+                        .alignment(Alignment::Center);
                     frame.render_widget(bar, Rect::new(x, y_pos, bar_width as u16, 1));
                 }
             }
