@@ -7,9 +7,11 @@ const HEADER: &str =
 ▐▛▀▘ ▐▌    ▐▛▀▘ ▐▌   ▐▛▀▜▌ ▐▌  ▐▛▀▀▘▐▛▀▚▖
 ▐▌▗▄▄▞▘    ▐▌   ▐▙▄▄▖▐▌ ▐▌ ▐▌  ▐▙▄▄▖▐▌ ▐▌
 "#;
-const YT_DLP_PATH: &str = "./bin/yt-dlp";
-const WGET_PATH: &str = "./bin/wget";
+// const YT_DLP_PATH: &str = "./bin/yt-dlp";
+// const WGET_PATH: &str = "./bin/wget";
 // const FFMPEG_PATH: &str = "./bin/ffmpeg";
+const YT_DLP_PATH: &str = "yt-dlp";
+const WGET_PATH: &str = "wget";
 const FFMPEG_PATH: &str = "ffplay";
 
 use std::time::{ Duration, Instant };
