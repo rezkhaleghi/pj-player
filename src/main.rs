@@ -9,13 +9,11 @@ const FFMPEG_PATH: &str = "ffplay";
 
 use std::time::{ Duration, Instant };
 use std::error::Error;
-use std::io;
 use std::process::{ Command, Stdio, Child };
-use std::fs;
 use std::thread;
 use std::sync::{ Arc, Mutex };
-use std::fs::File;
-use std::io::Read;
+use std::fs::{ self, File };
+use std::io::{ self, Read };
 
 use ratatui::{ prelude::*, widgets::*, layout::{ Layout, Direction, Constraint } };
 use crossterm::{
@@ -23,9 +21,9 @@ use crossterm::{
     terminal::{ disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen },
     execute,
 };
-
 use reqwest::Client;
 use serde_json::Value;
+
 #[derive(Debug, Clone, PartialEq)]
 enum Source {
     YouTube,
@@ -184,7 +182,6 @@ async fn search_archive(query: &str) -> Result<Vec<SearchResult>, Box<dyn Error>
 }
 
 // stream audio using yt-dlp and ffplay
-
 fn stream_audio(
     video_id: &str,
     visualization_data: Arc<Mutex<Vec<u8>>>
@@ -200,6 +197,7 @@ fn stream_audio(
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()?;
+
     // Start ffplay to play the audio
     let ffplay_stdin = yt_dlp.stdout.unwrap();
     let visualization_data_clone = Arc::clone(&visualization_data);
@@ -209,6 +207,7 @@ fn stream_audio(
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()?;
+
     // Spawn a thread to update visualization data
     let ffplay_id = ffplay.id();
     thread::spawn(move || {
@@ -232,6 +231,7 @@ fn stream_audio(
     });
     Ok(ffplay)
 }
+
 // download YouTube audio using yt-dlp
 fn download_youtube_audio(
     video_id: String,
