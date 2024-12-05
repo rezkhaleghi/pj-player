@@ -328,14 +328,14 @@ fn render(app: &AppUi, frame: &mut Frame) {
         .alignment(Alignment::Center); // Center the text
     frame.render_widget(header_paragraph, chunks[0]);
 
-    let second_header_paragraph = Paragraph::new("Made with ❤️ by Pocket Jack")
+    let second_header_paragraph = Paragraph::new("Made with 🌿 by Pocket Jack")
         .style(white_style)
         .alignment(Alignment::Center); // Center the text
     frame.render_widget(second_header_paragraph, chunks[1]);
 
     match app.current_view {
         View::InitialSelection => {
-            let buttons = vec!["1. DOWNLOAD", "2. STREAM"];
+            let buttons = vec!["1. STREAM", "2. DOWNLOAD"];
             let items: Vec<ListItem> = buttons
                 .iter()
                 .enumerate()
@@ -361,7 +361,7 @@ fn render(app: &AppUi, frame: &mut Frame) {
                 .title("Search Music")
                 .style(light_green_style);
 
-            let input_text = format!("(Enter Your Search Query): {}", app.search_input);
+            let input_text = format!("(Search Query): {}", app.search_input);
 
             let input = Paragraph::new(input_text).style(white_style).block(input_block);
 
@@ -558,12 +558,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             KeyCode::Enter => {
                                 match app.selected_result_index {
                                     Some(0) => {
-                                        app.mode = Some(Mode::Download);
+                                        app.mode = Some(Mode::Stream);
+                                        app.source = Source::YouTube; // Set source to YouTube for streaming
                                         app.current_view = View::SearchInput;
                                     }
                                     Some(1) => {
-                                        app.mode = Some(Mode::Stream);
-                                        app.source = Source::YouTube; // Set source to YouTube for streaming
+                                        app.mode = Some(Mode::Download);
                                         app.current_view = View::SearchInput;
                                     }
                                     _ => {}
