@@ -73,3 +73,35 @@ pub async fn search_archive(query: &str) -> Result<Vec<SearchResult>, Box<dyn Er
 
     Ok(results)
 }
+
+pub async fn search_fma(query: &str) -> Result<Vec<SearchResult>, Box<dyn Error>> {
+    let url = format!(
+        "https://freemusicarchive.org/api/trackSearch?q={}&limit=10",
+        query.replace(" ", "+")
+    );
+
+    let client = Client::new();
+    let response = client.get(&url).send().await?;
+    let json: Value = response.json().await?;
+
+    let mut results = Vec::new();
+    if let Some(dataset) = json["dataset"].as_array() {
+        for item in dataset {
+            if
+                let (Some(track_id), Some(track_title), Some(track_url)) = (
+                    item["track_id"].as_u64(),
+                    item["track_title"].as_str(),
+                    item["track_url"].as_str(),
+                )
+            {
+                results.push(SearchResult {
+                    identifier: track_id.to_string(),
+                    title: track_title.to_string(),
+                    source: Source::InternetArchive, // or Source::FMA if you add a new variant
+                });
+            }
+        }
+    }
+
+    Ok(results)
+}

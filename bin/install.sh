@@ -10,10 +10,6 @@ echo "Installing yt-dlp..."
 sudo apt-get update
 sudo apt-get install -y yt-dlp
 
-# Install wget
-echo "Installing wget..."
-sudo apt-get install -y wget
-
 # Install ffmpeg
 echo "Installing ffmpeg..."
 sudo apt install -y ffmpeg

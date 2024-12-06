@@ -75,14 +75,12 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
             frame.render_widget(input, search_chunks[0]);
         }
         View::SourceSelection => {
-            // Only include YouTube as the source
-            let sources = vec!["1. YouTube"];
+            let sources = vec!["1. YouTube", "2. Internet Archive", "3. Free Music Archive"];
             let items: Vec<ListItem> = sources
                 .iter()
                 .enumerate()
                 .map(|(i, &source)| {
-                    let style = if i == 0 {
-                        // Always select the first source (YouTube)
+                    let style = if i == app.selected_source_index {
                         Style::default().bg(Color::Blue).fg(Color::White)
                     } else {
                         white_style
@@ -183,7 +181,7 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
             let bar_width = (eq_area.width as usize) / eq_data.len(); // Adjust bar width calculation
             let visual_block = Block::default()
                 .borders(Borders::ALL)
-                .title("Visual")
+                .title(format!("Visual (Equalizer {})", app.current_equalizer + 1))
                 .style(Style::default().fg(Color::LightGreen));
 
             frame.render_widget(visual_block.clone(), eq_area);

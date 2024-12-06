@@ -1,12 +1,14 @@
 use std::error::Error;
 use std::process::Child;
 use std::sync::{ Arc, Mutex };
-use crate::search::{ search_youtube, search_archive };
+use crate::search::{ search_youtube, search_archive, search_fma };
+// use crossterm::event::{ KeyEvent, KeyCode };
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Source {
     YouTube,
     InternetArchive,
+    FreeMusicArchive,
 }
 
 #[derive(PartialEq)]
@@ -42,6 +44,7 @@ pub struct AppUi {
     pub visualization_data: Arc<Mutex<Vec<u8>>>,
     pub ffplay_process: Option<Child>,
     pub mode: Option<Mode>,
+    pub current_equalizer: usize,
     pub download_status: Arc<Mutex<Option<String>>>,
 }
 
@@ -56,6 +59,7 @@ impl AppUi {
             current_view: View::InitialSelection,
             visualization_data: Arc::new(Mutex::new(vec![0; 10])),
             ffplay_process: None,
+            current_equalizer: 0,
             mode: None,
             download_status: Arc::new(Mutex::new(None)),
         }
@@ -65,6 +69,7 @@ impl AppUi {
         self.search_results = match self.source {
             Source::YouTube => search_youtube(&self.search_input).await?,
             Source::InternetArchive => search_archive(&self.search_input).await?,
+            Source::FreeMusicArchive => search_fma(&self.search_input).await?,
         };
         self.current_view = View::SearchResults;
         self.selected_result_index = Some(0);
@@ -76,4 +81,14 @@ impl AppUi {
             let _ = process.kill();
         }
     }
+
+    // pub fn handle_key_press(&mut self, key: KeyEvent) {
+    //     match key {
+    //         KeyEvent { code: KeyCode::Char('e'), .. } => {
+    //             self.current_equalizer = (self.current_equalizer + 1) % 5;
+    //         }
+    //         // Handle other keys...
+    //         _ => {}
+    //     }
+    // }
 }

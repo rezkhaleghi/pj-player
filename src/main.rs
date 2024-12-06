@@ -19,7 +19,7 @@ use tokio::main;
 
 use app::{ AppUi, Mode, Source, View };
 use stream::stream_audio;
-use download::{ download_youtube_audio, download_archive_audio };
+use download::{ download_youtube_audio, download_archive_audio, download_fma_audio };
 use ui::render;
 
 #[main]
@@ -112,9 +112,9 @@ async fn handle_search_input(app: &mut AppUi, key: KeyEvent) -> Result<(), Box<d
             if app.mode == Some(Mode::Stream) {
                 app.search().await?;
             } else {
-                // app.current_view = View::SourceSelection;
-                app.source = Source::YouTube;
-                app.search().await?;
+                app.current_view = View::SourceSelection;
+                // app.source = Source::YouTube;
+                // app.search().await?;
             }
         }
         KeyCode::Char(c) => {
@@ -130,9 +130,9 @@ async fn handle_search_input(app: &mut AppUi, key: KeyEvent) -> Result<(), Box<d
             if app.mode == Some(Mode::Stream) {
                 app.search().await?;
             } else {
-                // app.current_view = View::SourceSelection;
-                app.source = Source::YouTube;
-                app.search().await?;
+                app.current_view = View::SourceSelection;
+                // app.source = Source::YouTube;
+                // app.search().await?;
             }
         }
         _ => {}
@@ -146,12 +146,14 @@ async fn handle_source_selection(app: &mut AppUi, key: KeyEvent) -> Result<(), B
             app.selected_source_index = app.selected_source_index.saturating_sub(1);
         }
         KeyCode::Down => {
-            app.selected_source_index = (app.selected_source_index + 1).min(1);
+            app.selected_source_index = (app.selected_source_index + 1).min(2); // Update the max index to 2
         }
         KeyCode::Enter => {
             app.source = match app.selected_source_index {
                 0 => Source::YouTube,
-                _ => Source::InternetArchive,
+                1 => Source::InternetArchive,
+                2 => Source::FreeMusicArchive,
+                _ => Source::YouTube,
             };
             app.search().await?;
         }
@@ -161,7 +163,9 @@ async fn handle_source_selection(app: &mut AppUi, key: KeyEvent) -> Result<(), B
         KeyCode::Right => {
             app.source = match app.selected_source_index {
                 0 => Source::YouTube,
-                _ => Source::InternetArchive,
+                1 => Source::InternetArchive,
+                2 => Source::FreeMusicArchive,
+                _ => Source::YouTube,
             };
             app.search().await?;
         }
@@ -215,6 +219,13 @@ async fn handle_search_results(app: &mut AppUi, key: KeyEvent) -> Result<(), Box
                                     Arc::clone(&app.download_status)
                                 );
                             }
+                            Source::FreeMusicArchive => {
+                                download_fma_audio(
+                                    selected.identifier.clone(),
+                                    selected.title.clone(),
+                                    Arc::clone(&app.download_status)
+                                );
+                            }
                         }
                     }
                     _ => {}
@@ -222,7 +233,15 @@ async fn handle_search_results(app: &mut AppUi, key: KeyEvent) -> Result<(), Box
             }
         }
         KeyCode::Left => {
-            app.current_view = View::SearchInput;
+            match app.mode {
+                Some(Mode::Stream) => {
+                    app.current_view = View::SearchInput;
+                }
+                Some(Mode::Download) => {
+                    app.current_view = View::SourceSelection;
+                }
+                _ => {}
+            }
         }
         KeyCode::Right => {
             if let Some(index) = app.selected_result_index {
@@ -247,6 +266,13 @@ async fn handle_search_results(app: &mut AppUi, key: KeyEvent) -> Result<(), Box
                             }
                             Source::InternetArchive => {
                                 download_archive_audio(
+                                    selected.identifier.clone(),
+                                    selected.title.clone(),
+                                    Arc::clone(&app.download_status)
+                                );
+                            }
+                            Source::FreeMusicArchive => {
+                                download_fma_audio(
                                     selected.identifier.clone(),
                                     selected.title.clone(),
                                     Arc::clone(&app.download_status)
