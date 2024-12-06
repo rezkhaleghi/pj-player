@@ -4,9 +4,9 @@ use std::fs::{ self, File };
 use std::thread;
 use reqwest::blocking::Client;
 use serde_json::Value;
-use std::io::copy;
 
 const YT_DLP_PATH: &str = "yt-dlp";
+const DOWNLOAD_PATH: &str = "~/Downloads";
 
 pub fn download_youtube_audio(
     video_id: String,
@@ -20,11 +20,14 @@ pub fn download_youtube_audio(
     }
 
     thread::spawn(move || {
-        let download_path = "./";
-        fs::create_dir_all(download_path).unwrap();
+        if let Err(e) = fs::create_dir_all(DOWNLOAD_PATH) {
+            let mut status_message = download_status.lock().unwrap();
+            *status_message = Some(format!("Failed to create directory: {}", e));
+            return;
+        }
 
         let sanitized_title = title.replace("/", "_").replace("\\", "_");
-        let output_path = format!("{}/{} (PJ-PLAYER).mp3", download_path, sanitized_title);
+        let output_path = format!("{}/{} (PJ-PLAYER).mp3", DOWNLOAD_PATH, sanitized_title);
 
         let status = Command::new(YT_DLP_PATH)
             .args(
@@ -49,7 +52,6 @@ pub fn download_youtube_audio(
         };
     });
 }
-
 pub fn download_archive_audio(
     identifier: String,
     title: String,
@@ -62,15 +64,14 @@ pub fn download_archive_audio(
     }
 
     thread::spawn(move || {
-        let download_path = "./";
-        if let Err(e) = std::fs::create_dir_all(download_path) {
+        if let Err(e) = fs::create_dir_all(DOWNLOAD_PATH) {
             let mut status_message = download_status.lock().unwrap();
             *status_message = Some(format!("Failed to create directory: {}", e));
             return;
         }
 
         let sanitized_title = title.replace("/", "_").replace("\\", "_");
-        let output_path = format!("{}/{} (PJ-PLAYER).mp3", download_path, sanitized_title);
+        let output_path = format!("{}/{} (PJ-PLAYER).mp3", DOWNLOAD_PATH, sanitized_title);
         let client = Client::new();
 
         // More robust error handling
@@ -121,45 +122,4 @@ fn download_archive_file(
     }
 
     Err("No suitable audio file found".into())
-}
-
-pub fn download_fma_audio(
-    track_url: String,
-    title: String,
-    download_status: Arc<Mutex<Option<String>>>
-) {
-    let status_message = format!("{} is downloading", title);
-    {
-        let mut status = download_status.lock().unwrap();
-        *status = Some(status_message);
-    }
-
-    thread::spawn(move || {
-        let download_path = "./";
-        if let Err(e) = std::fs::create_dir_all(download_path) {
-            let mut status_message = download_status.lock().unwrap();
-            *status_message = Some(format!("Failed to create directory: {}", e));
-            return;
-        }
-
-        let sanitized_title = title.replace("/", "_").replace("\\", "_");
-        let output_path = format!("{}/{} (PJ-PLAYER).mp3", download_path, sanitized_title);
-        let client = Client::new();
-
-        match client.get(&track_url).send() {
-            Ok(mut response) => {
-                if let Ok(mut file) = File::create(&output_path) {
-                    if copy(&mut response, &mut file).is_ok() {
-                        let mut status_message = download_status.lock().unwrap();
-                        *status_message = Some(format!("{} downloaded successfully", title));
-                        return;
-                    }
-                }
-            }
-            Err(e) => {
-                let mut status_message = download_status.lock().unwrap();
-                *status_message = Some(format!("Download failed: {}", e));
-            }
-        }
-    });
 }

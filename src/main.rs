@@ -19,7 +19,7 @@ use tokio::main;
 
 use app::{ AppUi, Mode, Source, View };
 use stream::stream_audio;
-use download::{ download_youtube_audio, download_archive_audio, download_fma_audio };
+use download::{ download_youtube_audio, download_archive_audio };
 use ui::render;
 
 #[main]
@@ -68,13 +68,29 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
 async fn handle_key_event(app: &mut AppUi, key: KeyEvent) -> Result<(), Box<dyn Error>> {
     match app.current_view {
-        View::InitialSelection => handle_initial_selection(app, key).await,
         View::SearchInput => handle_search_input(app, key).await,
+        View::InitialSelection => handle_initial_selection(app, key).await,
         View::SourceSelection => handle_source_selection(app, key).await,
         View::SearchResults => handle_search_results(app, key).await,
         View::Streaming => handle_streaming(app, key).await,
         View::Downloading => handle_downloading(app, key).await,
     }
+}
+
+async fn handle_search_input(app: &mut AppUi, key: KeyEvent) -> Result<(), Box<dyn Error>> {
+    match key.code {
+        KeyCode::Enter | KeyCode::Right => {
+            app.current_view = View::InitialSelection;
+        }
+        KeyCode::Char(c) => {
+            app.search_input.push(c);
+        }
+        KeyCode::Backspace => {
+            app.search_input.pop();
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 async fn handle_initial_selection(app: &mut AppUi, key: KeyEvent) -> Result<(), Box<dyn Error>> {
@@ -87,53 +103,23 @@ async fn handle_initial_selection(app: &mut AppUi, key: KeyEvent) -> Result<(), 
         KeyCode::Down => {
             app.selected_result_index = Some((app.selected_result_index.unwrap_or(0) + 1).min(1));
         }
-        KeyCode::Enter => {
+        KeyCode::Enter | KeyCode::Right => {
             match app.selected_result_index {
                 Some(0) => {
                     app.mode = Some(Mode::Stream);
                     app.source = Source::YouTube;
-                    app.current_view = View::SearchInput;
+                    app.search().await?;
+                    app.current_view = View::SearchResults;
                 }
                 Some(1) => {
                     app.mode = Some(Mode::Download);
-                    app.current_view = View::SearchInput;
+                    app.current_view = View::SourceSelection;
                 }
                 _ => {}
             }
         }
-        _ => {}
-    }
-    Ok(())
-}
-
-async fn handle_search_input(app: &mut AppUi, key: KeyEvent) -> Result<(), Box<dyn Error>> {
-    match key.code {
-        KeyCode::Enter => {
-            if app.mode == Some(Mode::Stream) {
-                app.search().await?;
-            } else {
-                app.current_view = View::SourceSelection;
-                // app.source = Source::YouTube;
-                // app.search().await?;
-            }
-        }
-        KeyCode::Char(c) => {
-            app.search_input.push(c);
-        }
-        KeyCode::Backspace => {
-            app.search_input.pop();
-        }
         KeyCode::Left => {
-            app.current_view = View::InitialSelection;
-        }
-        KeyCode::Right => {
-            if app.mode == Some(Mode::Stream) {
-                app.search().await?;
-            } else {
-                app.current_view = View::SourceSelection;
-                // app.source = Source::YouTube;
-                // app.search().await?;
-            }
+            app.current_view = View::SearchInput;
         }
         _ => {}
     }
@@ -146,28 +132,19 @@ async fn handle_source_selection(app: &mut AppUi, key: KeyEvent) -> Result<(), B
             app.selected_source_index = app.selected_source_index.saturating_sub(1);
         }
         KeyCode::Down => {
-            app.selected_source_index = (app.selected_source_index + 1).min(2); // Update the max index to 2
+            app.selected_source_index = (app.selected_source_index + 1).min(1); // Update the max index to 1
         }
-        KeyCode::Enter => {
+        KeyCode::Enter | KeyCode::Right => {
             app.source = match app.selected_source_index {
                 0 => Source::YouTube,
                 1 => Source::InternetArchive,
-                2 => Source::FreeMusicArchive,
                 _ => Source::YouTube,
             };
             app.search().await?;
+            app.current_view = View::SearchResults;
         }
         KeyCode::Left => {
-            app.current_view = View::SearchInput;
-        }
-        KeyCode::Right => {
-            app.source = match app.selected_source_index {
-                0 => Source::YouTube,
-                1 => Source::InternetArchive,
-                2 => Source::FreeMusicArchive,
-                _ => Source::YouTube,
-            };
-            app.search().await?;
+            app.current_view = View::InitialSelection;
         }
         _ => {}
     }
@@ -191,7 +168,7 @@ async fn handle_search_results(app: &mut AppUi, key: KeyEvent) -> Result<(), Box
                 app.selected_result_index = Some(idx);
             }
         }
-        KeyCode::Enter => {
+        KeyCode::Enter | KeyCode::Right => {
             if let Some(index) = app.selected_result_index {
                 let selected = &app.search_results[index];
                 match app.mode {
@@ -214,13 +191,6 @@ async fn handle_search_results(app: &mut AppUi, key: KeyEvent) -> Result<(), Box
                             }
                             Source::InternetArchive => {
                                 download_archive_audio(
-                                    selected.identifier.clone(),
-                                    selected.title.clone(),
-                                    Arc::clone(&app.download_status)
-                                );
-                            }
-                            Source::FreeMusicArchive => {
-                                download_fma_audio(
                                     selected.identifier.clone(),
                                     selected.title.clone(),
                                     Arc::clone(&app.download_status)
@@ -235,7 +205,7 @@ async fn handle_search_results(app: &mut AppUi, key: KeyEvent) -> Result<(), Box
         KeyCode::Left => {
             match app.mode {
                 Some(Mode::Stream) => {
-                    app.current_view = View::SearchInput;
+                    app.current_view = View::InitialSelection;
                 }
                 Some(Mode::Download) => {
                     app.current_view = View::SourceSelection;
@@ -243,59 +213,24 @@ async fn handle_search_results(app: &mut AppUi, key: KeyEvent) -> Result<(), Box
                 _ => {}
             }
         }
-        KeyCode::Right => {
-            if let Some(index) = app.selected_result_index {
-                let selected = &app.search_results[index];
-                match app.mode {
-                    Some(Mode::Stream) => {
-                        app.current_view = View::Streaming;
-                        let identifier = selected.identifier.clone();
-                        let visualization_data = Arc::clone(&app.visualization_data);
-                        let ffplay_process = stream_audio(&identifier, visualization_data)?;
-                        app.ffplay_process = Some(ffplay_process);
-                    }
-                    Some(Mode::Download) => {
-                        app.current_view = View::Downloading;
-                        match app.source {
-                            Source::YouTube => {
-                                download_youtube_audio(
-                                    selected.identifier.clone(),
-                                    selected.title.clone(),
-                                    Arc::clone(&app.download_status)
-                                );
-                            }
-                            Source::InternetArchive => {
-                                download_archive_audio(
-                                    selected.identifier.clone(),
-                                    selected.title.clone(),
-                                    Arc::clone(&app.download_status)
-                                );
-                            }
-                            Source::FreeMusicArchive => {
-                                download_fma_audio(
-                                    selected.identifier.clone(),
-                                    selected.title.clone(),
-                                    Arc::clone(&app.download_status)
-                                );
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
+
         _ => {}
     }
     Ok(())
 }
 
 async fn handle_streaming(app: &mut AppUi, key: KeyEvent) -> Result<(), Box<dyn Error>> {
-    if key.code == KeyCode::Esc {
-        app.stop_streaming();
-        app.current_view = View::SearchResults;
-    } else if key.code == KeyCode::Left {
-        app.stop_streaming();
-        app.current_view = View::SearchResults;
+    match key.code {
+        KeyCode::Esc | KeyCode::Left => {
+            app.stop_streaming();
+            app.current_view = View::SearchResults;
+        }
+        KeyCode::Char(' ') => {
+            if let Some(process) = &app.ffplay_process {
+            }
+        }
+
+        _ => {}
     }
     Ok(())
 }

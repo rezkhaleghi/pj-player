@@ -1,14 +1,13 @@
 use std::error::Error;
 use std::process::Child;
 use std::sync::{ Arc, Mutex };
-use crate::search::{ search_youtube, search_archive, search_fma };
+use crate::search::{ search_youtube, search_archive };
 // use crossterm::event::{ KeyEvent, KeyCode };
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Source {
     YouTube,
     InternetArchive,
-    FreeMusicArchive,
 }
 
 #[derive(PartialEq)]
@@ -19,14 +18,13 @@ pub enum Mode {
 
 #[derive(PartialEq)]
 pub enum View {
-    InitialSelection,
     SearchInput,
-    SourceSelection,
     SearchResults,
+    InitialSelection,
+    SourceSelection,
     Streaming,
     Downloading,
 }
-
 #[derive(Debug, Clone)]
 pub struct SearchResult {
     pub identifier: String,
@@ -56,7 +54,7 @@ impl AppUi {
             selected_result_index: Some(0),
             selected_source_index: 0,
             source: Source::YouTube,
-            current_view: View::InitialSelection,
+            current_view: View::SearchInput,
             visualization_data: Arc::new(Mutex::new(vec![0; 10])),
             ffplay_process: None,
             current_equalizer: 0,
@@ -69,7 +67,6 @@ impl AppUi {
         self.search_results = match self.source {
             Source::YouTube => search_youtube(&self.search_input).await?,
             Source::InternetArchive => search_archive(&self.search_input).await?,
-            Source::FreeMusicArchive => search_fma(&self.search_input).await?,
         };
         self.current_view = View::SearchResults;
         self.selected_result_index = Some(0);

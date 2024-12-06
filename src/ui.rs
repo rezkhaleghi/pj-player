@@ -32,27 +32,6 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
     frame.render_widget(second_header_paragraph, chunks[1]);
 
     match app.current_view {
-        View::InitialSelection => {
-            let buttons = vec!["1. STREAM", "2. DOWNLOAD"];
-            let items: Vec<ListItem> = buttons
-                .iter()
-                .enumerate()
-                .map(|(i, &button)| {
-                    let style = if Some(i) == app.selected_result_index {
-                        Style::default().bg(Color::Blue).fg(Color::White)
-                    } else {
-                        white_style
-                    };
-                    ListItem::new(button).style(style)
-                })
-                .collect();
-
-            let list = List::new(items).block(
-                Block::default().borders(Borders::ALL).title("Select Mode").style(light_green_style)
-            );
-
-            frame.render_widget(list, chunks[2]);
-        }
         View::SearchInput => {
             let input_block = Block::default()
                 .borders(Borders::ALL)
@@ -74,8 +53,29 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
 
             frame.render_widget(input, search_chunks[0]);
         }
+        View::InitialSelection => {
+            let buttons = vec!["1. STREAM", "2. DOWNLOAD"];
+            let items: Vec<ListItem> = buttons
+                .iter()
+                .enumerate()
+                .map(|(i, &button)| {
+                    let style = if Some(i) == app.selected_result_index {
+                        Style::default().bg(Color::Blue).fg(Color::White)
+                    } else {
+                        white_style
+                    };
+                    ListItem::new(button).style(style)
+                })
+                .collect();
+
+            let list = List::new(items).block(
+                Block::default().borders(Borders::ALL).title("Select Mode").style(light_green_style)
+            );
+
+            frame.render_widget(list, chunks[2]);
+        }
         View::SourceSelection => {
-            let sources = vec!["1. YouTube", "2. Internet Archive", "3. Free Music Archive"];
+            let sources = vec!["1. YouTube", "2. Internet Archive"];
             let items: Vec<ListItem> = sources
                 .iter()
                 .enumerate()
