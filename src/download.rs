@@ -6,7 +6,8 @@ use std::env;
 use std::path::PathBuf;
 use serde_json::Value;
 
-const YT_DLP_PATH: &str = "~/pj-player/bin/yt-dlp";
+// const YT_DLP_PATH: &str = "bin/yt-dlp";
+const YT_DLP_PATH: &str = "yt-dlp";
 
 fn get_download_path() -> PathBuf {
     let home_dir = env::var("HOME").expect("Could not find home directory");
