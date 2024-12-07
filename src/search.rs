@@ -1,10 +1,11 @@
 use std::error::Error;
-use std::process::Command;
+use std::process::{ Command, exit };
 use serde_json::Value;
 use reqwest::Client;
 use crate::app::{ SearchResult, Source };
 
-const YT_DLP_PATH: &str = "yt-dlp";
+// const YT_DLP_PATH: &str = "yt-dlp";
+const YT_DLP_PATH: &str = "bin/yt-dlp";
 
 pub async fn search_youtube(query: &str) -> Result<Vec<SearchResult>, Box<dyn Error>> {
     let output = Command::new(YT_DLP_PATH)
@@ -18,13 +19,12 @@ pub async fn search_youtube(query: &str) -> Result<Vec<SearchResult>, Box<dyn Er
         .output()?;
 
     if !output.status.success() {
-        return Err(
-            format!(
-                "yt-dlp failed with status: {:?}, stderr: {}",
-                output.status,
-                String::from_utf8_lossy(&output.stderr)
-            ).into()
+        eprintln!(
+            "yt-dlp failed with status: {:?}, stderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
         );
+        exit(1);
     }
 
     let stdout = String::from_utf8(output.stdout)?;

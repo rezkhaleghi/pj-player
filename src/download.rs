@@ -2,11 +2,16 @@ use std::process::{ Command, Stdio };
 use std::sync::{ Arc, Mutex };
 use std::fs::{ self, File };
 use std::thread;
-use reqwest::blocking::Client;
+use std::env;
+use std::path::PathBuf;
 use serde_json::Value;
 
-const YT_DLP_PATH: &str = "yt-dlp";
-const DOWNLOAD_PATH: &str = "~/Downloads";
+const YT_DLP_PATH: &str = "bin/yt-dlp";
+
+fn get_download_path() -> PathBuf {
+    let home_dir = env::var("HOME").expect("Could not find home directory");
+    PathBuf::from(home_dir).join("Downloads")
+}
 
 pub fn download_youtube_audio(
     video_id: String,
@@ -20,14 +25,15 @@ pub fn download_youtube_audio(
     }
 
     thread::spawn(move || {
-        if let Err(e) = fs::create_dir_all(DOWNLOAD_PATH) {
+        let download_path = get_download_path();
+        if let Err(e) = fs::create_dir_all(&download_path) {
             let mut status_message = download_status.lock().unwrap();
             *status_message = Some(format!("Failed to create directory: {}", e));
             return;
         }
 
         let sanitized_title = title.replace("/", "_").replace("\\", "_");
-        let output_path = format!("{}/{} (PJ-PLAYER).mp3", DOWNLOAD_PATH, sanitized_title);
+        let output_path = download_path.join(format!("{} (PJ-PLAYER).mp3", sanitized_title));
 
         let status = Command::new(YT_DLP_PATH)
             .args(
@@ -36,7 +42,7 @@ pub fn download_youtube_audio(
                     "--audio-format",
                     "mp3",
                     "-o",
-                    &output_path,
+                    output_path.to_str().unwrap(),
                     &format!("https://www.youtube.com/watch?v={}", video_id),
                 ]
             )
@@ -52,6 +58,7 @@ pub fn download_youtube_audio(
         };
     });
 }
+
 pub fn download_archive_audio(
     identifier: String,
     title: String,
@@ -64,15 +71,16 @@ pub fn download_archive_audio(
     }
 
     thread::spawn(move || {
-        if let Err(e) = fs::create_dir_all(DOWNLOAD_PATH) {
+        let download_path = get_download_path();
+        if let Err(e) = fs::create_dir_all(&download_path) {
             let mut status_message = download_status.lock().unwrap();
             *status_message = Some(format!("Failed to create directory: {}", e));
             return;
         }
 
         let sanitized_title = title.replace("/", "_").replace("\\", "_");
-        let output_path = format!("{}/{} (PJ-PLAYER).mp3", DOWNLOAD_PATH, sanitized_title);
-        let client = Client::new();
+        let output_path = download_path.join(format!("{} (PJ-PLAYER).mp3", sanitized_title));
+        let client = reqwest::blocking::Client::new();
 
         // More robust error handling
         match download_archive_file(&client, &identifier, &output_path) {
@@ -90,9 +98,9 @@ pub fn download_archive_audio(
 
 // Separate function for download logic with better error handling
 fn download_archive_file(
-    client: &Client,
+    client: &reqwest::blocking::Client,
     identifier: &str,
-    output_path: &str
+    output_path: &PathBuf
 ) -> Result<(), Box<dyn std::error::Error>> {
     let metadata_url = format!("https://archive.org/metadata/{}", identifier);
     let metadata_response = client.get(&metadata_url).send()?;

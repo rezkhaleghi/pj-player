@@ -225,10 +225,6 @@ async fn handle_streaming(app: &mut AppUi, key: KeyEvent) -> Result<(), Box<dyn 
             app.stop_streaming();
             app.current_view = View::SearchResults;
         }
-        KeyCode::Char(' ') => {
-            if let Some(process) = &app.ffplay_process {
-            }
-        }
 
         _ => {}
     }

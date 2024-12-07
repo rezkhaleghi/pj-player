@@ -6,7 +6,6 @@ brew update
 
 # Install dependencies
 echo "Installing dependencies..."
-brew install wget
 brew install ffmpeg
 brew install yt-dlp
 

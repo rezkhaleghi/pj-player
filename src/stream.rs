@@ -5,9 +5,12 @@ use std::fs::File;
 use std::io::Read;
 use std::thread;
 use std::time::Duration;
+// use std::path::PathBuf;
 
-const YT_DLP_PATH: &str = "yt-dlp";
-const FFMPEG_PATH: &str = "ffplay";
+const YT_DLP_PATH: &str = "bin/yt-dlp";
+const FFMPEG_PATH: &str = "bin/ffplay";
+// const YT_DLP_PATH: &str = "yt-dlp";
+// const FFMPEG_PATH: &str = "ffplay";
 
 pub fn stream_audio(
     video_id: &str,

@@ -1,0 +1,10 @@
+[bundle]
+name = "pjplayer"
+identifier = "foundation.false.pjplay"
+version = "0.1.0"
+icon = "./logo.png"
+
+[[bundle.resources]]
+path = "bin/yt-dlp"
+[[bundle.resources]]
+path = "bin/ffplay"
