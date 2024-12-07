@@ -18,7 +18,6 @@ Before running PJ-Player, you need to ensure that the following dependencies are
 
 - **Rust**: This project is written in Rust. Install Rust by following the instructions at [https://www.rust-lang.org/tools/install](https://www.rust-lang.org/tools/install).
 - **yt-dlp**: A YouTube downloader tool. Install it from [https://github.com/yt-dlp/yt-dlp](https://github.com/yt-dlp/yt-dlp).
-- **wget**: A command-line tool to download files from the web. Install it from [https://www.gnu.org/software/wget/](https://www.gnu.org/software/wget/).
 - **ffmpeg**: A complete, cross-platform solution to record, convert and stream audio and video. Install it from [https://ffmpeg.org/](https://ffmpeg.org/).
 
 ## Installation
@@ -35,8 +34,8 @@ To use [`PJ-Player`]
 
 2. **Install Dependencies** (if not already installed):
 
-   - Install Dependencies Manually
-   - OR Run the install.sh script in bin Directory
+   - Install Dependencies Manually 
+   - OR Run the install.sh (for macos: install-macos.sh) script in bin Directory
      (Assuming your in the /pj-player Directory)
 
    ```sh

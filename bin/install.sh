@@ -14,5 +14,4 @@ sudo apt-get install -y yt-dlp
 echo "Installing ffmpeg..."
 sudo apt install -y ffmpeg
 
-
 echo "All dependencies installed successfully."
