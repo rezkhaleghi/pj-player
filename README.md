@@ -8,9 +8,9 @@ PJ-Player is a Rust-based terminal application (TUI) that allows users to search
 
 ## Features
 
-- **Search for audio** on YouTube, Internet Archive, and (future) Spotify.
+- **Search for audio** on YouTube or Internet Archive.
+- **Stream audio** on YouTube.
 - **Download audio** from YouTube or Internet Archive.
-- Support for **command-line arguments** and **interactive search**.
 
 ## Requirements
 
