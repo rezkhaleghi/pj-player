@@ -5,7 +5,6 @@ use reqwest::Client;
 use crate::app::{ SearchResult, Source };
 
 const YT_DLP_PATH: &str = "yt-dlp";
-// const YT_DLP_PATH: &str = "bin/yt-dlp";
 
 pub async fn search_youtube(query: &str) -> Result<Vec<SearchResult>, Box<dyn Error>> {
     let output = Command::new(YT_DLP_PATH)
