@@ -95,9 +95,8 @@ Created and maintained by "PocketJack (Rez Khaleghi)"
 ## Support
 
 If you enjoy this app and would like to support my work:
-Your support helps me continue developing free and open-source stuff.
-
 - Patreon : https://patreon.com/PocketJack
+Your support helps me continue developing free and open-source stuff.
 
 
 
