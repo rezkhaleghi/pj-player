@@ -13,6 +13,7 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
 
     let light_green_style = Style::default().fg(Color::LightGreen);
     let white_style = Style::default().fg(Color::White);
+    let dim_style = Style::default().fg(Color::Gray); // Style for help texts
 
     let header_paragraph = Paragraph::new(
         r#"
@@ -145,10 +146,9 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
             let streaming_chunks = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
-                    Constraint::Percentage(14), // Song title
-                    Constraint::Length(3), // Play/pause status
-                    Constraint::Length(3), // Equalizer instruction
-                    Constraint::Percentage(50), // Equalizer
+                    Constraint::Percentage(20), // Song title
+                    Constraint::Percentage(60), // Equalizer
+                    Constraint::Length(7), // Help texts (increased for 3 lines)
                 ])
                 .split(chunks[2]);
 
@@ -170,37 +170,7 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
 
             frame.render_widget(song_info, streaming_chunks[0]);
 
-            // Play/pause status section
-            let status_block = Block::default().borders(Borders::ALL).style(light_green_style);
-
-            let status_text = if app.paused {
-                "Paused - Press SPACE to play"
-            } else {
-                "Playing - Press SPACE to pause"
-            };
-
-            let status_paragraph = Paragraph::new(status_text)
-                .style(white_style)
-                .block(status_block)
-                .alignment(Alignment::Center);
-
-            frame.render_widget(status_paragraph, streaming_chunks[1]);
-
-            // Equalizer instruction section
-            let eq_instruction_block = Block::default()
-                .borders(Borders::ALL)
-                .style(light_green_style);
-
-            let eq_instruction_text = "Press 1-6 to change equalizer style";
-
-            let eq_instruction_paragraph = Paragraph::new(eq_instruction_text)
-                .style(white_style)
-                .block(eq_instruction_block)
-                .alignment(Alignment::Center);
-
-            frame.render_widget(eq_instruction_paragraph, streaming_chunks[2]);
-
-            let eq_area = streaming_chunks[3];
+            let eq_area = streaming_chunks[1];
             let eq_data = app.visualization_data.lock().unwrap();
 
             let max_height = (eq_area.height as usize).min(10);
@@ -208,7 +178,7 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
             let visual_block = Block::default()
                 .borders(Borders::ALL)
                 .title(format!("Visual (Equalizer {})", app.current_equalizer + 1))
-                .style(Style::default().fg(Color::LightGreen));
+                .style(light_green_style);
 
             frame.render_widget(visual_block.clone(), eq_area);
 
@@ -230,7 +200,7 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
                 (vec!['█', ' '], Style::default().fg(Color::Red)),
             ];
 
-            let (chars, style) = &eq_styles[app.current_equalizer];
+            let (ref chars, ref style) = eq_styles[app.current_equalizer];
 
             for (i, &value) in eq_data.iter().enumerate() {
                 let bar_height = (((value as f64) / 10.0) * (max_height as f64)).round() as usize;
@@ -246,6 +216,33 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
                     frame.render_widget(bar, Rect::new(x, y_pos, bar_width as u16, 1));
                 }
             }
+
+            // Help texts section
+            let help_block = Block::default()
+                .borders(Borders::ALL)
+                .title("Controls")
+                .style(light_green_style);
+
+            let status_text = if app.paused {
+                "Paused - Press SPACE to play"
+            } else {
+                "Playing - Press SPACE to pause"
+            };
+
+            let help_text = Text::from(
+                vec![
+                    Line::from(Span::raw(status_text)),
+                    Line::from(Span::raw("Press 1-6 to change equalizer style")),
+                    Line::from(Span::raw("Press ← to go back to search results"))
+                ]
+            );
+
+            let help_paragraph = Paragraph::new(help_text)
+                .style(dim_style)
+                .block(help_block)
+                .alignment(Alignment::Center);
+
+            frame.render_widget(help_paragraph, streaming_chunks[2]);
         }
         View::Downloading => {
             let download_status = app.download_status.lock().unwrap();
