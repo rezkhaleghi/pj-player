@@ -1,3 +1,4 @@
+// ui.rs
 use ratatui::{ prelude::*, widgets::*, layout::{ Layout, Direction, Constraint } };
 use crate::app::{ AppUi, View };
 
@@ -23,12 +24,12 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
 "#
     )
         .style(light_green_style)
-        .alignment(Alignment::Center); // Center the text
+        .alignment(Alignment::Center);
     frame.render_widget(header_paragraph, chunks[0]);
 
     let second_header_paragraph = Paragraph::new("Made with 🌿 by Pocket Jack")
         .style(white_style)
-        .alignment(Alignment::Center); // Center the text
+        .alignment(Alignment::Center);
     frame.render_widget(second_header_paragraph, chunks[1]);
 
     match app.current_view {
@@ -42,13 +43,9 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
 
             let input = Paragraph::new(input_text).style(white_style).block(input_block);
 
-            // Adjust constraints to make the search input section smaller
             let search_chunks = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(3), // Smaller height for search input
-                    Constraint::Min(10),
-                ])
+                .constraints([Constraint::Length(3), Constraint::Min(10)])
                 .split(chunks[2]);
 
             frame.render_widget(input, search_chunks[0]);
@@ -99,7 +96,6 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
             frame.render_widget(list, chunks[2]);
         }
         View::SearchResults => {
-            // Clear the download status message when switching to SearchResults view
             {
                 let mut download_status = app.download_status.lock().unwrap();
                 *download_status = None;
@@ -149,18 +145,14 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
         View::Streaming => {
             let streaming_chunks = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Percentage(14), // Adjust the percentage to make the blocks closer
-                    Constraint::Percentage(50), //
-                ])
+                .constraints([Constraint::Percentage(14), Constraint::Percentage(50)])
                 .split(chunks[2]);
 
             let song_block = Block::default()
                 .borders(Borders::ALL)
-                .title("Now Streaming")
+                .title(if app.paused { "Now Paused" } else { "Now Streaming" }) // Update title based on pause state
                 .style(light_green_style);
 
-            // Assuming `app.search_results` contains the current streaming song
             let song_name = if let Some(index) = app.selected_result_index {
                 &app.search_results[index].title
             } else {
@@ -170,15 +162,15 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
             let song_info = Paragraph::new(song_name)
                 .style(white_style)
                 .block(song_block)
-                .alignment(Alignment::Center); // Center the text horizontally
+                .alignment(Alignment::Center);
 
             frame.render_widget(song_info, streaming_chunks[0]);
 
             let eq_area = streaming_chunks[1];
             let eq_data = app.visualization_data.lock().unwrap();
 
-            let max_height = (eq_area.height as usize).min(10); // Shorter height
-            let bar_width = (eq_area.width as usize) / eq_data.len(); // Adjust bar width calculation
+            let max_height = (eq_area.height as usize).min(10);
+            let bar_width = (eq_area.width as usize) / eq_data.len();
             let visual_block = Block::default()
                 .borders(Borders::ALL)
                 .title(format!("Visual (Equalizer {})", app.current_equalizer + 1))

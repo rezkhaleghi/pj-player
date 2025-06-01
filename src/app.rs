@@ -1,8 +1,7 @@
 use std::error::Error;
-use std::process::Child;
+use std::process::{ Child, Command };
 use std::sync::{ Arc, Mutex };
 use crate::search::{ search_youtube, search_archive };
-// use crossterm::event::{ KeyEvent, KeyCode };
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Source {
@@ -25,6 +24,7 @@ pub enum View {
     Streaming,
     Downloading,
 }
+
 #[derive(Debug, Clone)]
 pub struct SearchResult {
     pub identifier: String,
@@ -44,6 +44,7 @@ pub struct AppUi {
     pub mode: Option<Mode>,
     pub current_equalizer: usize,
     pub download_status: Arc<Mutex<Option<String>>>,
+    pub paused: bool, // New field to track pause state
 }
 
 impl AppUi {
@@ -60,6 +61,7 @@ impl AppUi {
             current_equalizer: 0,
             mode: None,
             download_status: Arc::new(Mutex::new(None)),
+            paused: false, // Initialize as not paused
         }
     }
 
@@ -76,6 +78,23 @@ impl AppUi {
     pub fn stop_streaming(&mut self) {
         if let Some(mut process) = self.ffplay_process.take() {
             let _ = process.kill();
+        }
+        self.paused = false; // Reset pause state when stopping
+    }
+
+    pub fn toggle_pause(&mut self) -> Result<(), Box<dyn Error>> {
+        if let Some(process) = &self.ffplay_process {
+            let pid = process.id();
+            let signal = if self.paused { "CONT" } else { "STOP" };
+            let status = Command::new("kill").args(&["-s", signal, &pid.to_string()]).status()?;
+            if status.success() {
+                self.paused = !self.paused; // Toggle pause state
+                Ok(())
+            } else {
+                Err(format!("Failed to send {} signal to ffplay", signal).into())
+            }
+        } else {
+            Err("No ffplay process running".into())
         }
     }
 

@@ -132,7 +132,7 @@ async fn handle_source_selection(app: &mut AppUi, key: KeyEvent) -> Result<(), B
             app.selected_source_index = app.selected_source_index.saturating_sub(1);
         }
         KeyCode::Down => {
-            app.selected_source_index = (app.selected_source_index + 1).min(1); // Update the max index to 1
+            app.selected_source_index = (app.selected_source_index + 1).min(1);
         }
         KeyCode::Enter | KeyCode::Right => {
             app.source = match app.selected_source_index {
@@ -178,6 +178,7 @@ async fn handle_search_results(app: &mut AppUi, key: KeyEvent) -> Result<(), Box
                         let visualization_data = Arc::clone(&app.visualization_data);
                         let ffplay_process = stream_audio(&identifier, visualization_data)?;
                         app.ffplay_process = Some(ffplay_process);
+                        app.paused = false; // Ensure not paused when starting stream
                     }
                     Some(Mode::Download) => {
                         app.current_view = View::Downloading;
@@ -213,7 +214,6 @@ async fn handle_search_results(app: &mut AppUi, key: KeyEvent) -> Result<(), Box
                 _ => {}
             }
         }
-
         _ => {}
     }
     Ok(())
@@ -225,18 +225,16 @@ async fn handle_streaming(app: &mut AppUi, key: KeyEvent) -> Result<(), Box<dyn 
             app.stop_streaming();
             app.current_view = View::SearchResults;
         }
-
+        KeyCode::Char(' ') => {
+            app.toggle_pause()?;
+        }
         _ => {}
     }
     Ok(())
 }
 
 async fn handle_downloading(app: &mut AppUi, key: KeyEvent) -> Result<(), Box<dyn Error>> {
-    if key.code == KeyCode::Left {
-        app.current_view = View::SearchResults;
-        let mut download_status = app.download_status.lock().unwrap();
-        *download_status = None;
-    } else if key.code == KeyCode::Esc {
+    if key.code == KeyCode::Left || key.code == KeyCode::Esc {
         app.current_view = View::SearchResults;
         let mut download_status = app.download_status.lock().unwrap();
         *download_status = None;
