@@ -1,4 +1,3 @@
-// ui.rs
 use ratatui::{ prelude::*, widgets::*, layout::{ Layout, Direction, Constraint } };
 use crate::app::{ AppUi, View };
 
@@ -145,12 +144,16 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
         View::Streaming => {
             let streaming_chunks = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([Constraint::Percentage(14), Constraint::Percentage(50)])
+                .constraints([
+                    Constraint::Percentage(14), // Song title
+                    Constraint::Length(3), // New status section
+                    Constraint::Percentage(50), // Equalizer
+                ])
                 .split(chunks[2]);
 
             let song_block = Block::default()
                 .borders(Borders::ALL)
-                .title(if app.paused { "Now Paused" } else { "Now Streaming" }) // Update title based on pause state
+                .title(if app.paused { "Now Paused" } else { "Now Streaming" })
                 .style(light_green_style);
 
             let song_name = if let Some(index) = app.selected_result_index {
@@ -166,7 +169,23 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
 
             frame.render_widget(song_info, streaming_chunks[0]);
 
-            let eq_area = streaming_chunks[1];
+            // New status section
+            let status_block = Block::default().borders(Borders::ALL).style(light_green_style);
+
+            let status_text = if app.paused {
+                "Paused - Press SPACE to play"
+            } else {
+                "Playing - Press SPACE to pause"
+            };
+
+            let status_paragraph = Paragraph::new(status_text)
+                .style(white_style)
+                .block(status_block)
+                .alignment(Alignment::Center);
+
+            frame.render_widget(status_paragraph, streaming_chunks[1]);
+
+            let eq_area = streaming_chunks[2];
             let eq_data = app.visualization_data.lock().unwrap();
 
             let max_height = (eq_area.height as usize).min(10);
