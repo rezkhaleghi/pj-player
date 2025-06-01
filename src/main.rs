@@ -176,9 +176,12 @@ async fn handle_search_results(app: &mut AppUi, key: KeyEvent) -> Result<(), Box
                         app.current_view = View::Streaming;
                         let identifier = selected.identifier.clone();
                         let visualization_data = Arc::clone(&app.visualization_data);
-                        let ffplay_process = stream_audio(&identifier, visualization_data)?;
+                        let ffplay_process = stream_audio(
+                            &identifier,
+                            visualization_data /* third_argument */
+                        )?;
                         app.ffplay_process = Some(ffplay_process);
-                        app.paused = false; // Ensure not paused when starting stream
+                        app.paused = false;
                     }
                     Some(Mode::Download) => {
                         app.current_view = View::Downloading;
@@ -227,6 +230,12 @@ async fn handle_streaming(app: &mut AppUi, key: KeyEvent) -> Result<(), Box<dyn 
         }
         KeyCode::Char(' ') => {
             app.toggle_pause()?;
+        }
+        KeyCode::Char(c) if c.is_digit(10) => {
+            let digit = c.to_digit(10).unwrap() as usize;
+            if digit >= 1 && digit <= 6 {
+                app.current_equalizer = digit - 1; // Map 1-6 to 0-5 for equalizer index
+            }
         }
         _ => {}
     }

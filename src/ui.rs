@@ -146,7 +146,8 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
                 .direction(Direction::Vertical)
                 .constraints([
                     Constraint::Percentage(14), // Song title
-                    Constraint::Length(3), // New status section
+                    Constraint::Length(3), // Play/pause status
+                    Constraint::Length(3), // Equalizer instruction
                     Constraint::Percentage(50), // Equalizer
                 ])
                 .split(chunks[2]);
@@ -169,7 +170,7 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
 
             frame.render_widget(song_info, streaming_chunks[0]);
 
-            // New status section
+            // Play/pause status section
             let status_block = Block::default().borders(Borders::ALL).style(light_green_style);
 
             let status_text = if app.paused {
@@ -185,7 +186,21 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
 
             frame.render_widget(status_paragraph, streaming_chunks[1]);
 
-            let eq_area = streaming_chunks[2];
+            // Equalizer instruction section
+            let eq_instruction_block = Block::default()
+                .borders(Borders::ALL)
+                .style(light_green_style);
+
+            let eq_instruction_text = "Press 1-6 to change equalizer style";
+
+            let eq_instruction_paragraph = Paragraph::new(eq_instruction_text)
+                .style(white_style)
+                .block(eq_instruction_block)
+                .alignment(Alignment::Center);
+
+            frame.render_widget(eq_instruction_paragraph, streaming_chunks[2]);
+
+            let eq_area = streaming_chunks[3];
             let eq_data = app.visualization_data.lock().unwrap();
 
             let max_height = (eq_area.height as usize).min(10);
@@ -199,6 +214,24 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
 
             let inner_area = visual_block.inner(eq_area);
 
+            // Define equalizer styles
+            let eq_styles = [
+                // Style 0: Original (alternating | and space, green)
+                (vec!['|', ' '], Style::default().fg(Color::Green)),
+                // Style 1: Solid blocks, cyan
+                (vec!['█'], Style::default().fg(Color::Cyan)),
+                // Style 2: Horizontal lines, yellow
+                (vec!['='], Style::default().fg(Color::Yellow)),
+                // Style 3: Shaded blocks, magenta
+                (vec!['▒'], Style::default().fg(Color::Magenta)),
+                // Style 4: Double lines, blue
+                (vec!['‖'], Style::default().fg(Color::Blue)),
+                // Style 5: Alternating blocks and spaces, red
+                (vec!['█', ' '], Style::default().fg(Color::Red)),
+            ];
+
+            let (chars, style) = &eq_styles[app.current_equalizer];
+
             for (i, &value) in eq_data.iter().enumerate() {
                 let bar_height = (((value as f64) / 10.0) * (max_height as f64)).round() as usize;
                 let x = inner_area.x + ((i * bar_width) as u16);
@@ -206,9 +239,9 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
 
                 for j in 0..bar_height {
                     let y_pos = y + (j as u16);
-                    let char = if j % 2 == 0 { '|' } else { ' ' };
+                    let char = chars[j % chars.len()];
                     let bar = Paragraph::new(char.to_string())
-                        .style(Style::default().fg(Color::Green))
+                        .style(*style)
                         .alignment(Alignment::Center);
                     frame.render_widget(bar, Rect::new(x, y_pos, bar_width as u16, 1));
                 }

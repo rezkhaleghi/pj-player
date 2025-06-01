@@ -1,4 +1,3 @@
-// stream.rs
 use std::error::Error;
 use std::process::{ Command, Stdio, Child };
 use std::sync::{ Arc, Mutex };
@@ -7,8 +6,6 @@ use std::io::Read;
 use std::thread;
 use std::time::Duration;
 
-// const YT_DLP_PATH: &str = "bin/yt-dlp";
-// const FFMPEG_PATH: &str = "bin/ffplay";
 const YT_DLP_PATH: &str = "yt-dlp";
 const FFMPEG_PATH: &str = "ffplay";
 
