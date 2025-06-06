@@ -44,7 +44,7 @@ pub struct AppUi {
     pub mode: Option<Mode>,
     pub current_equalizer: usize,
     pub download_status: Arc<Mutex<Option<String>>>,
-    pub paused: bool, // New field to track pause state
+    pub paused: bool,
 }
 
 impl AppUi {
@@ -61,7 +61,7 @@ impl AppUi {
             current_equalizer: 0,
             mode: None,
             download_status: Arc::new(Mutex::new(None)),
-            paused: false, // Initialize as not paused
+            paused: false,
         }
     }
 
@@ -78,8 +78,9 @@ impl AppUi {
     pub fn stop_streaming(&mut self) {
         if let Some(mut process) = self.ffplay_process.take() {
             let _ = process.kill();
+            let _ = process.wait();
         }
-        self.paused = false; // Reset pause state when stopping
+        self.paused = false;
     }
 
     pub fn toggle_pause(&mut self) -> Result<(), Box<dyn Error>> {
@@ -88,7 +89,7 @@ impl AppUi {
             let signal = if self.paused { "CONT" } else { "STOP" };
             let status = Command::new("kill").args(&["-s", signal, &pid.to_string()]).status()?;
             if status.success() {
-                self.paused = !self.paused; // Toggle pause state
+                self.paused = !self.paused;
                 Ok(())
             } else {
                 Err(format!("Failed to send {} signal to ffplay", signal).into())
@@ -97,14 +98,10 @@ impl AppUi {
             Err("No ffplay process running".into())
         }
     }
+}
 
-    // pub fn handle_key_press(&mut self, key: KeyEvent) {
-    //     match key {
-    //         KeyEvent { code: KeyCode::Char('e'), .. } => {
-    //             self.current_equalizer = (self.current_equalizer + 1) % 5;
-    //         }
-    //         // Handle other keys...
-    //         _ => {}
-    //     }
-    // }
+impl Drop for AppUi {
+    fn drop(&mut self) {
+        self.stop_streaming();
+    }
 }
