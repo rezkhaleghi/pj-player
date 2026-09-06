@@ -1,5 +1,7 @@
-//ui.rs
-use ratatui::{ prelude::*, widgets::*, layout::{ Layout, Direction, Constraint } };
+// ui.rs
+
+use ratatui::{ layout::{ Constraint, Direction, Layout }, prelude::*, widgets::* };
+
 use crate::app::{ AppUi, View };
 
 pub fn render(app: &AppUi, frame: &mut Frame) {
@@ -14,7 +16,7 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
 
     let light_green_style = Style::default().fg(Color::LightGreen);
     let white_style = Style::default().fg(Color::White);
-    let dim_style = Style::default().fg(Color::Gray); // Style for help texts
+    let dim_style = Style::default().fg(Color::Gray);
 
     let header_paragraph = Paragraph::new(
         r#"
@@ -26,11 +28,13 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
     )
         .style(light_green_style)
         .alignment(Alignment::Center);
+
     frame.render_widget(header_paragraph, chunks[0]);
 
     let second_header_paragraph = Paragraph::new("Made with 🌿 by Pocket Jack")
         .style(white_style)
         .alignment(Alignment::Center);
+
     frame.render_widget(second_header_paragraph, chunks[1]);
 
     match app.current_view {
@@ -51,8 +55,10 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
 
             frame.render_widget(input, search_chunks[0]);
         }
+
         View::InitialSelection => {
             let buttons = vec!["1. STREAM", "2. DOWNLOAD"];
+
             let items: Vec<ListItem> = buttons
                 .iter()
                 .enumerate()
@@ -62,6 +68,7 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
                     } else {
                         white_style
                     };
+
                     ListItem::new(button).style(style)
                 })
                 .collect();
@@ -72,8 +79,10 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
 
             frame.render_widget(list, chunks[2]);
         }
+
         View::SourceSelection => {
             let sources = vec!["1. YouTube", "2. Internet Archive"];
+
             let items: Vec<ListItem> = sources
                 .iter()
                 .enumerate()
@@ -83,6 +92,7 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
                     } else {
                         white_style
                     };
+
                     ListItem::new(source).style(style)
                 })
                 .collect();
@@ -96,20 +106,24 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
 
             frame.render_widget(list, chunks[2]);
         }
+
         View::SearchResults => {
-            {
-                let mut download_status = app.download_status.lock().unwrap();
-                *download_status = None;
-            }
+            // Clear any previous download status when returning
+            // to the search results screen.
+            let mut download_status = app.download_status.lock().unwrap();
+            *download_status = None;
+            drop(download_status);
 
             if app.search_results.is_empty() {
-                let no_results_item = ListItem::new("NO MUSIC FOUND =(").style(white_style).bold();
+                let no_results_item = ListItem::new("NO MUSIC FOUND ==").style(white_style).bold();
+
                 let no_results_list = List::new(vec![no_results_item]).block(
                     Block::default()
                         .borders(Borders::ALL)
                         .title("Search Results")
                         .style(light_green_style)
                 );
+
                 frame.render_widget(no_results_list, chunks[2]);
             } else {
                 let results: Vec<ListItem> = app.search_results
@@ -129,6 +143,7 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
                                 Span::raw(format!(" ({:?})", result.source))
                             ]
                         );
+
                         ListItem::new(content).style(style)
                     })
                     .collect();
@@ -143,15 +158,20 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
                 frame.render_widget(list, chunks[2]);
             }
         }
+
         View::Streaming => {
             let streaming_chunks = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
-                    Constraint::Percentage(20), // Song title
-                    Constraint::Percentage(60), // Equalizer
-                    Constraint::Length(7), // Help texts (increased for 3 lines)
+                    Constraint::Length(5), // Song information
+                    Constraint::Min(8), // Equalizer
+                    Constraint::Length(7), // Controls
                 ])
                 .split(chunks[2]);
+
+            // ---------------------------------------------------------
+            // Song information
+            // ---------------------------------------------------------
 
             let song_block = Block::default()
                 .borders(Borders::ALL)
@@ -159,23 +179,43 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
                 .style(light_green_style);
 
             let song_name = if let Some(index) = app.selected_result_index {
-                &app.search_results[index].title
+                app.search_results
+                    .get(index)
+                    .map(|result| result.title.as_str())
+                    .unwrap_or("Unknown Song")
             } else {
                 "Unknown Song"
             };
 
-            let song_info = Paragraph::new(song_name)
-                .style(white_style)
+            let current_time = format_time(app.position);
+            let total_time = format_time(app.duration);
+
+            let song_info = Text::from(
+                vec![
+                    Line::from(Span::styled(song_name, white_style)),
+                    Line::from(
+                        Span::styled(
+                            format!("{} / {}", current_time, total_time),
+                            light_green_style
+                        )
+                    )
+                ]
+            );
+
+            let song_paragraph = Paragraph::new(song_info)
                 .block(song_block)
                 .alignment(Alignment::Center);
 
-            frame.render_widget(song_info, streaming_chunks[0]);
+            frame.render_widget(song_paragraph, streaming_chunks[0]);
+
+            // ---------------------------------------------------------
+            // Equalizer
+            // ---------------------------------------------------------
 
             let eq_area = streaming_chunks[1];
+
             let eq_data = app.visualization_data.lock().unwrap();
 
-            let max_height = (eq_area.height as usize).min(10);
-            let bar_width = (eq_area.width as usize) / eq_data.len();
             let visual_block = Block::default()
                 .borders(Borders::ALL)
                 .title(format!("Visual (Equalizer {})", app.current_equalizer + 1))
@@ -185,40 +225,75 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
 
             let inner_area = visual_block.inner(eq_area);
 
-            // Define equalizer styles
-            let eq_styles = [
-                // Style 0: Original (alternating | and space, green)
-                (vec!['|', ' '], Style::default().fg(Color::Green)),
-                // Style 1: Solid blocks, cyan
-                (vec!['█'], Style::default().fg(Color::Cyan)),
-                // Style 2: Horizontal lines, yellow
-                (vec!['='], Style::default().fg(Color::Yellow)),
-                // Style 3: Shaded blocks, magenta
-                (vec!['▒'], Style::default().fg(Color::Magenta)),
-                // Style 4: Double lines, blue
-                (vec!['‖'], Style::default().fg(Color::Blue)),
-                // Style 5: Alternating blocks and spaces, red
-                (vec!['█', ' '], Style::default().fg(Color::Red)),
-            ];
+            // Don't attempt to divide by the number of values if
+            // the visualization data happens to be empty.
+            if !eq_data.is_empty() && inner_area.width > 0 && inner_area.height > 0 {
+                let max_height = (inner_area.height as usize).min(10);
 
-            let (ref chars, ref style) = eq_styles[app.current_equalizer];
+                let bar_width = ((inner_area.width as usize) / eq_data.len()).max(1);
 
-            for (i, &value) in eq_data.iter().enumerate() {
-                let bar_height = (((value as f64) / 10.0) * (max_height as f64)).round() as usize;
-                let x = inner_area.x + ((i * bar_width) as u16);
-                let y = inner_area.y + inner_area.height - (bar_height as u16);
+                let eq_styles = [
+                    // Style 1
+                    (vec!['|', ' '], Style::default().fg(Color::Green)),
 
-                for j in 0..bar_height {
-                    let y_pos = y + (j as u16);
-                    let char = chars[j % chars.len()];
-                    let bar = Paragraph::new(char.to_string())
-                        .style(*style)
-                        .alignment(Alignment::Center);
-                    frame.render_widget(bar, Rect::new(x, y_pos, bar_width as u16, 1));
+                    // Style 2
+                    (vec!['█'], Style::default().fg(Color::Cyan)),
+
+                    // Style 3
+                    (vec!['='], Style::default().fg(Color::Yellow)),
+
+                    // Style 4
+                    (vec!['▒'], Style::default().fg(Color::Magenta)),
+
+                    // Style 5
+                    (vec!['‖'], Style::default().fg(Color::Blue)),
+
+                    // Style 6
+                    (vec!['█', ' '], Style::default().fg(Color::Red)),
+                ];
+
+                let (chars, style) = &eq_styles[app.current_equalizer];
+
+                for (i, &value) in eq_data.iter().enumerate() {
+                    let bar_height = (
+                        ((value as f64) / 10.0) *
+                        (max_height as f64)
+                    ).round() as usize;
+
+                    let x = inner_area.x + ((i * bar_width) as u16);
+
+                    // Stop rendering once the next bar would be outside
+                    // the available width.
+                    if x >= inner_area.x + inner_area.width {
+                        break;
+                    }
+
+                    let available_width = (inner_area.x + inner_area.width - x) as usize;
+
+                    let actual_width = bar_width.min(available_width);
+
+                    let clamped_height = bar_height.min(inner_area.height as usize);
+
+                    let y = inner_area.y + inner_area.height - (clamped_height as u16);
+
+                    for j in 0..clamped_height {
+                        let y_pos = y + (j as u16);
+
+                        let character = chars[j % chars.len()];
+
+                        let bar = Paragraph::new(character.to_string())
+                            .style(*style)
+                            .alignment(Alignment::Center);
+
+                        frame.render_widget(bar, Rect::new(x, y_pos, actual_width as u16, 1));
+                    }
                 }
             }
 
-            // Help texts section
+            // ---------------------------------------------------------
+            // Controls
+            // ---------------------------------------------------------
+
             let help_block = Block::default()
                 .borders(Borders::ALL)
                 .title("Controls")
@@ -233,8 +308,8 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
             let help_text = Text::from(
                 vec![
                     Line::from(Span::raw(status_text)),
-                    Line::from(Span::raw("Press 1-6 to change equalizer style")),
-                    Line::from(Span::raw("Press ← to go back to search results"))
+                    Line::from(Span::raw("← / →  Seek 15 seconds")),
+                    Line::from(Span::raw("1-6 Equalizer style   |   ESC Back to search"))
                 ]
             );
 
@@ -245,8 +320,10 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
 
             frame.render_widget(help_paragraph, streaming_chunks[2]);
         }
+
         View::Downloading => {
             let download_status = app.download_status.lock().unwrap();
+
             let status_message = download_status.as_deref().unwrap_or("No downloads in progress");
 
             let download_block = Block::default()
@@ -262,4 +339,19 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
             frame.render_widget(download_paragraph, chunks[2]);
         }
     }
+}
+
+/// Formats a duration in seconds as MM:SS.
+///
+/// Examples:
+///     0      -> 00:00
+///     83     -> 01:23
+///     843    -> 14:03
+fn format_time(seconds: f64) -> String {
+    let total_seconds = seconds.max(0.0) as u64;
+
+    let minutes = total_seconds / 60;
+    let seconds = total_seconds % 60;
+
+    format!("{:02}:{:02}", minutes, seconds)
 }

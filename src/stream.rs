@@ -1,9 +1,7 @@
 // stream.rs
 
 use std::error::Error;
-use std::fs::File;
-use std::io::Read;
-use std::process::{ Command, Stdio };
+use std::process::Command;
 use std::sync::{ Arc, Mutex };
 use std::thread;
 use std::time::Duration;
@@ -11,100 +9,110 @@ use std::time::Duration;
 use crate::app::StreamProcess;
 
 const YT_DLP_PATH: &str = "yt-dlp";
-const FFMPEG_PATH: &str = "ffplay";
 
-/// Starts streaming a YouTube video.
+pub struct StreamInfo {
+    pub title: String,
+    pub duration: f64,
+    pub direct_url: String,
+}
+
+/// Starts a YouTube audio stream.
 ///
-/// The audio pipeline is:
+/// The new pipeline is:
 ///
 ///     YouTube
 ///        ↓
-///     yt-dlp
-///        ↓ stdout
+///     yt-dlp metadata + direct URL
+///        ↓
 ///     ffplay
 ///
-/// The returned StreamProcess owns both child processes so the
-/// application can later pause, resume, or stop the stream.
+/// ffplay receives the direct media URL itself, which allows us
+/// to restart it with `-ss` when the user seeks.
 pub fn stream_audio(
     video_id: &str,
     visualization_data: Arc<Mutex<Vec<u8>>>
-) -> Result<StreamProcess, Box<dyn Error>> {
-    // Build the YouTube URL from the selected search result.
+) -> Result<(StreamProcess, StreamInfo), Box<dyn Error>> {
     let youtube_url = format!("https://www.youtube.com/watch?v={}", video_id);
 
-    // First ask yt-dlp for the title so we can display what is
-    // currently being streamed.
-    let output = Command::new(YT_DLP_PATH).args(["-s", "--get-title", &youtube_url]).output()?;
-
-    let song_name = String::from_utf8_lossy(&output.stdout).trim().to_string();
-
-    println!("Streaming: {}", song_name);
-
-    // Start yt-dlp and tell it to write the best available audio
-    // directly to stdout instead of creating a file.
-    let mut yt_dlp = Command::new(YT_DLP_PATH)
-        .args(["-o", "-", "-f", "bestaudio", "--quiet", &youtube_url])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()?;
-
-    // Move yt-dlp's stdout pipe into ffplay.
+    // Get the title and duration from yt-dlp.
     //
-    // `take()` is important here because we still need to keep
-    // ownership of the yt-dlp Child itself inside StreamProcess.
-    let ffplay_stdin = yt_dlp.stdout.take().unwrap();
+    // We request both values in one metadata call so we don't
+    // need another process just to determine the song duration.
+    let metadata_output = Command::new(YT_DLP_PATH)
+        .args(["--skip-download", "--print", "%(title)s\n%(duration)s", &youtube_url])
+        .output()?;
 
-    // Clone the visualization state so the visualization thread
-    // can update it independently of the main application.
+    if !metadata_output.status.success() {
+        let error = String::from_utf8_lossy(&metadata_output.stderr);
+
+        return Err(format!("yt-dlp failed to get video metadata: {}", error.trim()).into());
+    }
+
+    let metadata = String::from_utf8_lossy(&metadata_output.stdout);
+
+    let mut lines = metadata.lines();
+
+    let title = lines.next().unwrap_or("Unknown Song").trim().to_string();
+
+    let duration_text = lines.next().unwrap_or("0").trim();
+
+    let duration = duration_text.parse::<f64>().unwrap_or(0.0);
+
+    // Ask yt-dlp for the actual media URL.
+    let url_output = Command::new(YT_DLP_PATH)
+        .args(["-f", "bestaudio", "--get-url", &youtube_url])
+        .output()?;
+
+    if !url_output.status.success() {
+        let error = String::from_utf8_lossy(&url_output.stderr);
+
+        return Err(format!("yt-dlp failed to get audio URL: {}", error.trim()).into());
+    }
+
+    let direct_url = String::from_utf8_lossy(&url_output.stdout)
+        .lines()
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_string();
+
+    if direct_url.is_empty() {
+        return Err("yt-dlp returned an empty audio URL".into());
+    }
+
+    println!("Streaming: {}", title);
+
+    // Start ffplay directly from the media URL.
+    let stream_process = StreamProcess::start(direct_url.clone(), 0.0)?;
+
+    // Keep the existing visualizer temporarily.
+    //
+    // This is still fake visualization data and will be replaced
+    // in the visualization step later.
     let visualization_data_clone = Arc::clone(&visualization_data);
 
-    // Start ffplay and feed it the audio coming from yt-dlp.
-    let ffplay = Command::new(FFMPEG_PATH)
-        .args(["-nodisp", "-autoexit", "-loglevel", "quiet", "-"])
-        .stdin(ffplay_stdin)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()?;
-
-    let ffplay_id = ffplay.id();
-
-    // This thread currently generates fake visualization data.
-    //
-    // It checks whether ffplay is still running and updates the
-    // visualization approximately every 100ms.
-    //
-    // We will replace this OS/process polling and random-data
-    // approach in a later step.
     thread::spawn(move || {
-        let mut file = File::open("/dev/urandom").unwrap();
-
-        while
-            Command::new("ps")
-                .arg("-p")
-                .arg(ffplay_id.to_string())
-                .output()
-                .unwrap()
-                .status.success()
-        {
-            let mut data = visualization_data_clone.lock().unwrap();
+        loop {
+            let Ok(mut data) = visualization_data_clone.lock() else {
+                return;
+            };
 
             for value in data.iter_mut() {
-                let mut buf = [0u8; 1];
-
-                // Generate a random value for the fake equalizer.
-                file.read_exact(&mut buf).unwrap();
-
-                *value = buf[0] % 10;
+                *value = (*value + 1) % 10;
             }
 
-            // Update the visualization roughly ten times per second.
+            drop(data);
+
             thread::sleep(Duration::from_millis(100));
         }
     });
 
-    // StreamProcess now owns both child processes.
-    //
-    // AppUi does not need to know that there are two processes or
-    // how they are stopped.
-    Ok(StreamProcess::new(yt_dlp, ffplay))
+    Ok((
+        stream_process,
+        StreamInfo {
+            title,
+            duration,
+            direct_url,
+        },
+    ))
 }

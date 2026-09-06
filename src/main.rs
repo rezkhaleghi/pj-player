@@ -1,3 +1,5 @@
+// main.rs
+
 mod app;
 mod search;
 mod stream;
@@ -37,10 +39,29 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let mut app = AppUi::new();
 
+    let result = run_app(&mut terminal, &mut app).await;
+
+    disable_raw_mode()?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    terminal.show_cursor()?;
+
+    result
+}
+
+async fn run_app(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    app: &mut AppUi
+) -> Result<(), Box<dyn Error>> {
     let tick_rate = Duration::from_millis(250);
     let mut last_tick = Instant::now();
 
     loop {
+        // Update the playback position before rendering the UI.
+        //
+        // This allows the displayed time to progress while the
+        // song is playing without constantly querying ffplay.
+        app.update_playback_position();
+
         terminal.draw(|frame| render(&app, frame))?;
 
         let timeout = tick_rate
@@ -49,15 +70,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
         if crossterm::event::poll(timeout)? {
             if let Event::Key(key) = event::read()? {
+                // ESC or Ctrl+C exits the application.
                 if
-                    key.code == KeyCode::Esc ||
-                    (key.code == KeyCode::Char('c') &&
-                        key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL))
+                    key.code == KeyCode::Char('c') &&
+                    key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL)
                 {
                     break;
                 }
 
-                handle_key_event(&mut app, key).await?;
+                handle_key_event(app, key).await?;
             }
         }
 
@@ -65,10 +86,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
             last_tick = Instant::now();
         }
     }
-
-    disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-    terminal.show_cursor()?;
 
     Ok(())
 }
@@ -220,10 +237,16 @@ async fn handle_search_results(app: &mut AppUi, key: KeyEvent) -> Result<(), Box
 
                     let visualization_data = Arc::clone(&app.visualization_data);
 
-                    let stream_process = stream_audio(&identifier, visualization_data)?;
+                    let (stream_process, stream_info) = stream_audio(
+                        &identifier,
+                        visualization_data
+                    )?;
 
                     app.stream_process = Some(stream_process);
-                    app.paused = false;
+
+                    // Initialize playback timing using the duration
+                    // returned by yt-dlp.
+                    app.start_playback(stream_info.duration);
                 }
 
                 Some(Mode::Download) => {
@@ -274,19 +297,34 @@ async fn handle_search_results(app: &mut AppUi, key: KeyEvent) -> Result<(), Box
 
 async fn handle_streaming(app: &mut AppUi, key: KeyEvent) -> Result<(), Box<dyn Error>> {
     match key.code {
-        KeyCode::Esc | KeyCode::Left => {
+        // ESC exits the current stream and returns to the search results.
+        //
+        // Left and Right are reserved for seeking.
+        KeyCode::Esc => {
             app.stop_streaming();
             app.current_view = View::SearchResults;
         }
 
+        // SPACE toggles pause/resume.
         KeyCode::Char(' ') => {
             app.toggle_pause()?;
         }
 
-        KeyCode::Char(c) if c.is_digit(10) => {
-            let digit = c.to_digit(10).unwrap() as usize;
+        // Seek backward by 15 seconds.
+        KeyCode::Left => {
+            app.seek_backward()?;
+        }
 
-            if digit >= 1 && digit <= 6 {
+        // Seek forward by 15 seconds.
+        KeyCode::Right => {
+            app.seek_forward()?;
+        }
+
+        // Change equalizer visualization style.
+        KeyCode::Char(c) if c.is_ascii_digit() => {
+            let digit = c.to_digit(10).unwrap_or(0) as usize;
+
+            if (1..=6).contains(&digit) {
                 app.current_equalizer = digit - 1;
             }
         }
