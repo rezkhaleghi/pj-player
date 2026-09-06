@@ -1,11 +1,20 @@
 use std::error::Error;
-use std::process::{ Child, Command };
+use std::io::{ Read, Write };
+use std::process::{ Child, Command, Stdio };
 use std::sync::{ atomic::{ AtomicBool, Ordering }, Arc, Mutex };
+use std::thread::{ self, JoinHandle };
 use std::time::Instant;
 
 use crate::search::{ search_archive, search_youtube };
 
-const FFMPEG_PATH: &str = "ffplay";
+const FFMPEG_PATH: &str = "ffmpeg";
+const FFPLAY_PATH: &str = "ffplay";
+
+const AUDIO_SAMPLE_RATE: &str = "44100";
+const AUDIO_CHANNELS: &str = "2";
+const AUDIO_FORMAT: &str = "s16le";
+
+const VISUALIZATION_BAR_COUNT: usize = 10;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Source {
@@ -36,48 +45,154 @@ pub struct SearchResult {
     pub source: Source,
 }
 
-/// Owns the ffplay process for the current stream.
+/// Owns the complete audio playback pipeline.
 ///
-/// yt-dlp is no longer kept alive during playback. Instead, yt-dlp
-/// gives us a temporary direct media URL and ffplay plays that URL.
+/// direct URL
+///     │
+///     ▼
+///   ffmpeg
+///     │ raw PCM
+///     ├──────────► Rust audio analyzer
+///     │
+///     ▼
+///   ffplay
+///     │
+///     ▼
+///  speakers
 ///
-/// Keeping the URL here allows us to restart ffplay when seeking.
+/// Seeking restarts the complete pipeline at the requested position.
 pub struct StreamProcess {
+    ffmpeg: Child,
     ffplay: Child,
     direct_url: String,
+
+    visualization_data: Arc<Mutex<Vec<u8>>>,
     visualizer_running: Arc<AtomicBool>,
+    audio_thread: Option<JoinHandle<()>>,
 }
 
 impl StreamProcess {
     pub fn start(
         direct_url: String,
         position: f64,
-        visualizer_running: Arc<AtomicBool>
+        visualization_data: Arc<Mutex<Vec<u8>>>
     ) -> Result<Self, Box<dyn Error>> {
-        let ffplay = Command::new(FFMPEG_PATH)
-            .args([
-                "-nodisp",
-                "-autoexit",
-                "-loglevel",
-                "quiet",
-                "-ss",
-                &position.to_string(),
-                &direct_url,
-            ])
-            .spawn()?;
+        let visualizer_running = Arc::new(AtomicBool::new(true));
+
+        reset_visualization(&visualization_data);
+
+        let (ffmpeg, ffplay, audio_thread) = Self::spawn_pipeline(
+            &direct_url,
+            position,
+            Arc::clone(&visualization_data),
+            Arc::clone(&visualizer_running)
+        )?;
 
         Ok(Self {
+            ffmpeg,
             ffplay,
             direct_url,
+            visualization_data,
             visualizer_running,
+            audio_thread: Some(audio_thread),
         })
     }
 
-    pub fn ffplay_id(&self) -> u32 {
-        self.ffplay.id()
+    fn spawn_pipeline(
+        direct_url: &str,
+        position: f64,
+        visualization_data: Arc<Mutex<Vec<u8>>>,
+        visualizer_running: Arc<AtomicBool>
+    ) -> Result<(Child, Child, JoinHandle<()>), Box<dyn Error>> {
+        let position = position.to_string();
+
+        let mut ffmpeg = Command::new(FFMPEG_PATH)
+            .args([
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-ss",
+                &position,
+                "-i",
+                direct_url,
+                "-vn",
+                "-f",
+                AUDIO_FORMAT,
+                "-ar",
+                AUDIO_SAMPLE_RATE,
+                "-ac",
+                AUDIO_CHANNELS,
+                "pipe:1",
+            ])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()?;
+
+        let mut ffplay = match
+            Command::new(FFPLAY_PATH)
+                .args([
+                    "-nodisp",
+                    "-autoexit",
+                    "-loglevel",
+                    "warning",
+                    "-f",
+                    AUDIO_FORMAT,
+                    "-ar",
+                    AUDIO_SAMPLE_RATE,
+                    "-ch_layout",
+                    "stereo",
+                    "-i",
+                    "pipe:0",
+                ])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+        {
+            Ok(process) => process,
+            Err(error) => {
+                let _ = ffmpeg.kill();
+                let _ = ffmpeg.wait();
+
+                return Err(error.into());
+            }
+        };
+
+        let mut ffmpeg_stdout = ffmpeg.stdout.take().ok_or("Failed to access ffmpeg stdout")?;
+
+        let mut ffplay_stdin = ffplay.stdin.take().ok_or("Failed to access ffplay stdin")?;
+
+        let audio_thread = thread::spawn(move || {
+            let mut buffer = vec![0u8; 16 * 1024];
+
+            while visualizer_running.load(Ordering::Relaxed) {
+                let bytes_read = match ffmpeg_stdout.read(&mut buffer) {
+                    Ok(0) => {
+                        break;
+                    }
+                    Ok(bytes_read) => bytes_read,
+                    Err(_) => {
+                        break;
+                    }
+                };
+
+                if ffplay_stdin.write_all(&buffer[..bytes_read]).is_err() {
+                    break;
+                }
+
+                update_visualization(&buffer[..bytes_read], &visualization_data);
+            }
+
+            reset_visualization(&visualization_data);
+        });
+
+        Ok((ffmpeg, ffplay, audio_thread))
     }
 
     /// Checks whether ffplay has exited without blocking.
+    ///
+    /// ffmpeg can finish producing audio before ffplay finishes
+    /// playing it, so playback lifecycle is determined by ffplay.
     pub fn try_wait(&mut self) -> Result<bool, Box<dyn Error>> {
         Ok(self.ffplay.try_wait()?.is_some())
     }
@@ -85,51 +200,157 @@ impl StreamProcess {
     pub fn stop(mut self) {
         self.visualizer_running.store(false, Ordering::Relaxed);
 
+        let _ = self.ffmpeg.kill();
         let _ = self.ffplay.kill();
+
+        let _ = self.ffmpeg.wait();
         let _ = self.ffplay.wait();
+
+        if let Some(thread) = self.audio_thread.take() {
+            let _ = thread.join();
+        }
+
+        reset_visualization(&self.visualization_data);
     }
 
     pub fn pause(&self) -> Result<(), Box<dyn Error>> {
-        let status = Command::new("kill")
-            .args(["-s", "STOP", &self.ffplay.id().to_string()])
-            .status()?;
+        pause_process(self.ffmpeg.id())?;
+        pause_process(self.ffplay.id())?;
 
-        if status.success() {
-            Ok(())
-        } else {
-            Err("Failed to pause ffplay".into())
-        }
+        Ok(())
     }
 
     pub fn resume(&self) -> Result<(), Box<dyn Error>> {
-        let status = Command::new("kill")
-            .args(["-s", "CONT", &self.ffplay.id().to_string()])
-            .status()?;
-
-        if status.success() {
-            Ok(())
-        } else {
-            Err("Failed to resume ffplay".into())
-        }
-    }
-
-    pub fn seek(&mut self, position: f64) -> Result<(), Box<dyn Error>> {
-        let _ = self.ffplay.kill();
-        let _ = self.ffplay.wait();
-
-        self.ffplay = Command::new(FFMPEG_PATH)
-            .args([
-                "-nodisp",
-                "-autoexit",
-                "-loglevel",
-                "quiet",
-                "-ss",
-                &position.to_string(),
-                &self.direct_url,
-            ])
-            .spawn()?;
+        resume_process(self.ffmpeg.id())?;
+        resume_process(self.ffplay.id())?;
 
         Ok(())
+    }
+
+    /// Restarts both ffmpeg and ffplay at the requested position.
+    pub fn seek(&mut self, position: f64) -> Result<(), Box<dyn Error>> {
+        self.visualizer_running.store(false, Ordering::Relaxed);
+
+        let _ = self.ffmpeg.kill();
+        let _ = self.ffplay.kill();
+
+        let _ = self.ffmpeg.wait();
+        let _ = self.ffplay.wait();
+
+        if let Some(thread) = self.audio_thread.take() {
+            let _ = thread.join();
+        }
+
+        reset_visualization(&self.visualization_data);
+
+        self.visualizer_running.store(true, Ordering::Relaxed);
+
+        let (ffmpeg, ffplay, audio_thread) = match
+            Self::spawn_pipeline(
+                &self.direct_url,
+                position,
+                Arc::clone(&self.visualization_data),
+                Arc::clone(&self.visualizer_running)
+            )
+        {
+            Ok(result) => result,
+            Err(error) => {
+                self.visualizer_running.store(false, Ordering::Relaxed);
+                return Err(error);
+            }
+        };
+
+        self.ffmpeg = ffmpeg;
+        self.ffplay = ffplay;
+        self.audio_thread = Some(audio_thread);
+
+        Ok(())
+    }
+}
+
+fn pause_process(pid: u32) -> Result<(), Box<dyn Error>> {
+    let status = Command::new("kill").args(["-s", "STOP", &pid.to_string()]).status()?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("Failed to pause process {}", pid).into())
+    }
+}
+
+fn resume_process(pid: u32) -> Result<(), Box<dyn Error>> {
+    let status = Command::new("kill").args(["-s", "CONT", &pid.to_string()]).status()?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("Failed to resume process {}", pid).into())
+    }
+}
+
+/// Converts raw PCM samples into visualization levels.
+///
+/// The PCM stream is divided into ten small windows.
+/// Each window gets an RMS amplitude value and is converted
+/// into a 0-10 level for the terminal equalizer.
+fn update_visualization(audio_data: &[u8], visualization_data: &Arc<Mutex<Vec<u8>>>) {
+    if audio_data.len() < 2 {
+        return;
+    }
+
+    let sample_count = audio_data.len() / 2;
+
+    if sample_count == 0 {
+        return;
+    }
+
+    let samples_per_bar = sample_count.div_ceil(VISUALIZATION_BAR_COUNT);
+
+    let mut levels = vec![0u8; VISUALIZATION_BAR_COUNT];
+
+    for (bar, level) in levels.iter_mut().enumerate() {
+        let start_sample = bar * samples_per_bar;
+        let end_sample = ((bar + 1) * samples_per_bar).min(sample_count);
+
+        if start_sample >= end_sample {
+            continue;
+        }
+
+        let start_byte = start_sample * 2;
+        let end_byte = end_sample * 2;
+
+        let mut sum = 0.0f64;
+        let mut count = 0usize;
+
+        for chunk in audio_data[start_byte..end_byte].chunks_exact(2) {
+            let sample = i16::from_le_bytes([chunk[0], chunk[1]]);
+
+            let normalized = (sample as f64) / (i16::MAX as f64);
+
+            sum += normalized * normalized;
+            count += 1;
+        }
+
+        if count == 0 {
+            continue;
+        }
+
+        let rms = (sum / (count as f64)).sqrt();
+
+        // Boost quieter audio so the visualization remains visible.
+        let value = (rms * 20.0).round().clamp(0.0, 10.0);
+
+        *level = value as u8;
+    }
+
+    if let Ok(mut data) = visualization_data.lock() {
+        *data = levels;
+    }
+}
+
+fn reset_visualization(visualization_data: &Arc<Mutex<Vec<u8>>>) {
+    if let Ok(mut data) = visualization_data.lock() {
+        data.fill(0);
     }
 }
 
@@ -154,6 +375,7 @@ pub struct AppUi {
     pub duration: f64,
     pub position: f64,
     pub playback_started_at: Option<Instant>,
+    pub playback_base_position: f64,
 }
 
 impl AppUi {
@@ -179,13 +401,14 @@ impl AppUi {
             duration: 0.0,
             position: 0.0,
             playback_started_at: None,
+            playback_base_position: 0.0,
         }
     }
 
     pub async fn search(&mut self) -> Result<(), Box<dyn Error>> {
         self.search_results = match self.source {
-            Source::YouTube => search_youtube(&self.search_input).await?,
-            Source::InternetArchive => search_archive(&self.search_input).await?,
+            Source::YouTube => { search_youtube(&self.search_input).await? }
+            Source::InternetArchive => { search_archive(&self.search_input).await? }
         };
 
         self.current_view = View::SearchResults;
@@ -198,6 +421,7 @@ impl AppUi {
     pub fn start_playback(&mut self, duration: f64) {
         self.duration = duration;
         self.position = 0.0;
+        self.playback_base_position = 0.0;
         self.playback_started_at = Some(Instant::now());
         self.paused = false;
     }
@@ -211,7 +435,7 @@ impl AppUi {
             return;
         };
 
-        self.position = started_at.elapsed().as_secs_f64();
+        self.position = self.playback_base_position + started_at.elapsed().as_secs_f64();
 
         if self.duration > 0.0 {
             self.position = self.position.min(self.duration);
@@ -219,9 +443,6 @@ impl AppUi {
     }
 
     /// Detects when ffplay exits naturally.
-    ///
-    /// When playback finishes, clean up the stream state and return
-    /// to the search results view.
     pub fn update_stream_lifecycle(&mut self) -> Result<(), Box<dyn Error>> {
         let finished = if let Some(stream_process) = &mut self.stream_process {
             stream_process.try_wait()?
@@ -242,29 +463,30 @@ impl AppUi {
             stream_process.stop();
         }
 
+        reset_visualization(&self.visualization_data);
+
         self.paused = false;
         self.position = 0.0;
         self.duration = 0.0;
         self.playback_started_at = None;
+        self.playback_base_position = 0.0;
     }
 
     pub fn toggle_pause(&mut self) -> Result<(), Box<dyn Error>> {
         if self.stream_process.is_none() {
-            return Err("No ffplay process running".into());
+            return Err("No stream process running".into());
         }
 
         if self.paused {
-            self.stream_process.as_ref().ok_or("No ffplay process running")?.resume()?;
+            self.stream_process.as_ref().ok_or("No stream process running")?.resume()?;
 
             self.paused = false;
-
-            self.playback_started_at = Some(
-                Instant::now() - std::time::Duration::from_secs_f64(self.position)
-            );
+            self.playback_base_position = self.position;
+            self.playback_started_at = Some(Instant::now());
         } else {
             self.update_playback_position();
 
-            self.stream_process.as_ref().ok_or("No ffplay process running")?.pause()?;
+            self.stream_process.as_ref().ok_or("No stream process running")?.pause()?;
 
             self.paused = true;
             self.playback_started_at = None;
@@ -285,6 +507,7 @@ impl AppUi {
         self.update_playback_position();
 
         let mut new_position = self.position + amount;
+
         new_position = new_position.max(0.0);
 
         if self.duration > 0.0 {
@@ -292,7 +515,7 @@ impl AppUi {
         }
 
         let Some(stream_process) = &mut self.stream_process else {
-            return Err("No ffplay process running".into());
+            return Err("No stream process running".into());
         };
 
         stream_process.seek(new_position)?;
@@ -301,11 +524,12 @@ impl AppUi {
 
         if self.paused {
             stream_process.pause()?;
+
+            self.playback_base_position = new_position;
             self.playback_started_at = None;
         } else {
-            self.playback_started_at = Some(
-                Instant::now() - std::time::Duration::from_secs_f64(new_position)
-            );
+            self.playback_base_position = new_position;
+            self.playback_started_at = Some(Instant::now());
         }
 
         Ok(())

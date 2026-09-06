@@ -1,10 +1,6 @@
-// stream.rs
-
 use std::error::Error;
 use std::process::Command;
-use std::sync::{ atomic::{ AtomicBool, Ordering }, Arc, Mutex };
-use std::thread;
-use std::time::Duration;
+use std::sync::{ Arc, Mutex };
 
 use crate::app::StreamProcess;
 
@@ -13,31 +9,26 @@ const YT_DLP_PATH: &str = "yt-dlp";
 pub struct StreamInfo {
     pub title: String,
     pub duration: f64,
-    pub direct_url: String,
 }
 
-/// Starts a YouTube audio stream.
+/// Resolves a YouTube video into a direct audio URL and starts
+/// the StreamProcess playback pipeline.
 ///
-/// The pipeline is:
+/// yt-dlp:
 ///
-///     YouTube
-///        ↓
-///     yt-dlp metadata + direct URL
-///        ↓
-///     ffplay
+///     YouTube → direct audio URL
 ///
-/// ffplay receives the direct media URL itself, which allows us
-/// to restart it with `-ss` when the user seeks.
+/// StreamProcess:
+///
+///     direct URL → ffmpeg → raw PCM → ffplay
+///                              │
+///                              └→ Rust visualization
 pub fn stream_audio(
     video_id: &str,
     visualization_data: Arc<Mutex<Vec<u8>>>
 ) -> Result<(StreamProcess, StreamInfo), Box<dyn Error>> {
     let youtube_url = format!("https://www.youtube.com/watch?v={}", video_id);
 
-    // Get the title and duration from yt-dlp.
-    //
-    // We request both values in one metadata call so we don't
-    // need another process just to determine the song duration.
     let metadata_output = Command::new(YT_DLP_PATH)
         .args(["--skip-download", "--print", "%(title)s\n%(duration)s", &youtube_url])
         .output()?;
@@ -58,7 +49,6 @@ pub fn stream_audio(
 
     let duration = duration_text.parse::<f64>().unwrap_or(0.0);
 
-    // Ask yt-dlp for the actual media URL.
     let url_output = Command::new(YT_DLP_PATH)
         .args(["-f", "bestaudio", "--get-url", &youtube_url])
         .output()?;
@@ -82,48 +72,13 @@ pub fn stream_audio(
 
     println!("Streaming: {}", title);
 
-    // This flag controls the lifetime of the visualizer worker.
-    //
-    // The StreamProcess owns the flag, so stopping the stream
-    // automatically tells the visualizer thread to exit.
-    let visualizer_running = Arc::new(AtomicBool::new(true));
-
-    // Start ffplay directly from the media URL.
-    let stream_process = StreamProcess::start(
-        direct_url.clone(),
-        0.0,
-        Arc::clone(&visualizer_running)
-    )?;
-
-    // Keep the existing visualizer temporarily.
-    //
-    // This is still fake visualization data and will be replaced
-    // in the visualization step later.
-    let visualization_data_clone = Arc::clone(&visualization_data);
-    let visualizer_running_clone = Arc::clone(&visualizer_running);
-
-    thread::spawn(move || {
-        while visualizer_running_clone.load(Ordering::Relaxed) {
-            let Ok(mut data) = visualization_data_clone.lock() else {
-                return;
-            };
-
-            for value in data.iter_mut() {
-                *value = (*value + 1) % 10;
-            }
-
-            drop(data);
-
-            thread::sleep(Duration::from_millis(100));
-        }
-    });
+    let stream_process = StreamProcess::start(direct_url, 0.0, visualization_data)?;
 
     Ok((
         stream_process,
         StreamInfo {
             title,
             duration,
-            direct_url,
         },
     ))
 }
