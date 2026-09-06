@@ -1,5 +1,3 @@
-// main.rs
-
 mod app;
 mod search;
 mod stream;
@@ -56,10 +54,7 @@ async fn run_app(
     let mut last_tick = Instant::now();
 
     loop {
-        // Update the playback position before rendering the UI.
-        //
-        // This allows the displayed time to progress while the
-        // song is playing without constantly querying ffplay.
+        app.update_stream_lifecycle()?;
         app.update_playback_position();
 
         terminal.draw(|frame| render(&app, frame))?;
@@ -70,7 +65,6 @@ async fn run_app(
 
         if crossterm::event::poll(timeout)? {
             if let Event::Key(key) = event::read()? {
-                // ESC or Ctrl+C exits the application.
                 if
                     key.code == KeyCode::Char('c') &&
                     key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL)
@@ -133,7 +127,7 @@ async fn handle_initial_selection(app: &mut AppUi, key: KeyEvent) -> Result<(), 
             app.selected_result_index = Some((app.selected_result_index.unwrap_or(0) + 1).min(1));
         }
 
-        KeyCode::Enter | KeyCode::Right => {
+        KeyCode::Enter | KeyCode::Right =>
             match app.selected_result_index {
                 Some(0) => {
                     app.mode = Some(Mode::Stream);
@@ -151,7 +145,6 @@ async fn handle_initial_selection(app: &mut AppUi, key: KeyEvent) -> Result<(), 
 
                 _ => {}
             }
-        }
 
         KeyCode::Left => {
             app.current_view = View::SearchInput;
@@ -212,7 +205,6 @@ async fn handle_search_results(app: &mut AppUi, key: KeyEvent) -> Result<(), Box
                 app.selected_result_index = None;
             } else {
                 let current_index = app.selected_result_index.unwrap_or(0);
-
                 let next_index = (current_index + 1).min(app.search_results.len() - 1);
 
                 app.selected_result_index = Some(next_index);
@@ -244,8 +236,6 @@ async fn handle_search_results(app: &mut AppUi, key: KeyEvent) -> Result<(), Box
 
                     app.stream_process = Some(stream_process);
 
-                    // Initialize playback timing using the duration
-                    // returned by yt-dlp.
                     app.start_playback(stream_info.duration);
                 }
 
@@ -275,7 +265,7 @@ async fn handle_search_results(app: &mut AppUi, key: KeyEvent) -> Result<(), Box
             }
         }
 
-        KeyCode::Left => {
+        KeyCode::Left =>
             match app.mode {
                 Some(Mode::Stream) => {
                     app.current_view = View::InitialSelection;
@@ -287,7 +277,6 @@ async fn handle_search_results(app: &mut AppUi, key: KeyEvent) -> Result<(), Box
 
                 _ => {}
             }
-        }
 
         _ => {}
     }
@@ -297,30 +286,23 @@ async fn handle_search_results(app: &mut AppUi, key: KeyEvent) -> Result<(), Box
 
 async fn handle_streaming(app: &mut AppUi, key: KeyEvent) -> Result<(), Box<dyn Error>> {
     match key.code {
-        // ESC exits the current stream and returns to the search results.
-        //
-        // Left and Right are reserved for seeking.
         KeyCode::Esc => {
             app.stop_streaming();
             app.current_view = View::SearchResults;
         }
 
-        // SPACE toggles pause/resume.
         KeyCode::Char(' ') => {
             app.toggle_pause()?;
         }
 
-        // Seek backward by 15 seconds.
         KeyCode::Left => {
             app.seek_backward()?;
         }
 
-        // Seek forward by 15 seconds.
         KeyCode::Right => {
             app.seek_forward()?;
         }
 
-        // Change equalizer visualization style.
         KeyCode::Char(c) if c.is_ascii_digit() => {
             let digit = c.to_digit(10).unwrap_or(0) as usize;
 

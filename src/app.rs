@@ -1,9 +1,7 @@
-// app.rs
-
 use std::error::Error;
 use std::process::{ Child, Command };
 use std::sync::{ atomic::{ AtomicBool, Ordering }, Arc, Mutex };
-use std::time::{ Duration, Instant };
+use std::time::Instant;
 
 use crate::search::{ search_archive, search_youtube };
 
@@ -51,10 +49,6 @@ pub struct StreamProcess {
 }
 
 impl StreamProcess {
-    /// Starts ffplay using a direct media URL.
-    ///
-    /// `position` is the position in seconds from which playback
-    /// should begin.
     pub fn start(
         direct_url: String,
         position: f64,
@@ -79,12 +73,15 @@ impl StreamProcess {
         })
     }
 
-    /// Returns the ffplay process ID.
     pub fn ffplay_id(&self) -> u32 {
         self.ffplay.id()
     }
 
-    /// Stops ffplay and signals the visualizer thread to stop.
+    /// Checks whether ffplay has exited without blocking.
+    pub fn try_wait(&mut self) -> Result<bool, Box<dyn Error>> {
+        Ok(self.ffplay.try_wait()?.is_some())
+    }
+
     pub fn stop(mut self) {
         self.visualizer_running.store(false, Ordering::Relaxed);
 
@@ -92,7 +89,6 @@ impl StreamProcess {
         let _ = self.ffplay.wait();
     }
 
-    /// Pauses ffplay using SIGSTOP.
     pub fn pause(&self) -> Result<(), Box<dyn Error>> {
         let status = Command::new("kill")
             .args(["-s", "STOP", &self.ffplay.id().to_string()])
@@ -105,7 +101,6 @@ impl StreamProcess {
         }
     }
 
-    /// Resumes ffplay using SIGCONT.
     pub fn resume(&self) -> Result<(), Box<dyn Error>> {
         let status = Command::new("kill")
             .args(["-s", "CONT", &self.ffplay.id().to_string()])
@@ -118,11 +113,6 @@ impl StreamProcess {
         }
     }
 
-    /// Restarts ffplay from a new position.
-    ///
-    /// Seeking is implemented by restarting ffplay with a new
-    /// `-ss` value because ffplay does not give our TUI a convenient
-    /// seeking API in the current setup.
     pub fn seek(&mut self, position: f64) -> Result<(), Box<dyn Error>> {
         let _ = self.ffplay.kill();
         let _ = self.ffplay.wait();
@@ -161,16 +151,8 @@ pub struct AppUi {
 
     pub paused: bool,
 
-    /// Total duration of the currently playing song in seconds.
     pub duration: f64,
-
-    /// Current playback position in seconds.
     pub position: f64,
-
-    /// When playback started or resumed.
-    ///
-    /// We use this to calculate the current position without
-    /// repeatedly querying ffplay.
     pub playback_started_at: Option<Instant>,
 }
 
@@ -213,7 +195,6 @@ impl AppUi {
         Ok(())
     }
 
-    /// Starts tracking playback time.
     pub fn start_playback(&mut self, duration: f64) {
         self.duration = duration;
         self.position = 0.0;
@@ -221,9 +202,6 @@ impl AppUi {
         self.paused = false;
     }
 
-    /// Updates the current playback position.
-    ///
-    /// This is called by the main event loop before rendering the UI.
     pub fn update_playback_position(&mut self) {
         if self.current_view != View::Streaming || self.paused {
             return;
@@ -235,10 +213,28 @@ impl AppUi {
 
         self.position = started_at.elapsed().as_secs_f64();
 
-        // Never display a position beyond the known duration.
         if self.duration > 0.0 {
             self.position = self.position.min(self.duration);
         }
+    }
+
+    /// Detects when ffplay exits naturally.
+    ///
+    /// When playback finishes, clean up the stream state and return
+    /// to the search results view.
+    pub fn update_stream_lifecycle(&mut self) -> Result<(), Box<dyn Error>> {
+        let finished = if let Some(stream_process) = &mut self.stream_process {
+            stream_process.try_wait()?
+        } else {
+            false
+        };
+
+        if finished {
+            self.stop_streaming();
+            self.current_view = View::SearchResults;
+        }
+
+        Ok(())
     }
 
     pub fn stop_streaming(&mut self) {
@@ -263,10 +259,9 @@ impl AppUi {
             self.paused = false;
 
             self.playback_started_at = Some(
-                Instant::now() - Duration::from_secs_f64(self.position)
+                Instant::now() - std::time::Duration::from_secs_f64(self.position)
             );
         } else {
-            // Update the position before pausing.
             self.update_playback_position();
 
             self.stream_process.as_ref().ok_or("No ffplay process running")?.pause()?;
@@ -278,26 +273,20 @@ impl AppUi {
         Ok(())
     }
 
-    /// Seeks forward by 15 seconds.
     pub fn seek_forward(&mut self) -> Result<(), Box<dyn Error>> {
         self.seek_by(15.0)
     }
 
-    /// Seeks backward by 15 seconds.
     pub fn seek_backward(&mut self) -> Result<(), Box<dyn Error>> {
         self.seek_by(-15.0)
     }
 
-    /// Seeks relative to the current playback position.
     fn seek_by(&mut self, amount: f64) -> Result<(), Box<dyn Error>> {
         self.update_playback_position();
 
         let mut new_position = self.position + amount;
-
-        // Never seek before the beginning.
         new_position = new_position.max(0.0);
 
-        // Never seek beyond the end of the song.
         if self.duration > 0.0 {
             new_position = new_position.min(self.duration);
         }
@@ -310,12 +299,13 @@ impl AppUi {
 
         self.position = new_position;
 
-        // If we were paused, keep the newly restarted ffplay paused.
         if self.paused {
             stream_process.pause()?;
             self.playback_started_at = None;
         } else {
-            self.playback_started_at = Some(Instant::now() - Duration::from_secs_f64(new_position));
+            self.playback_started_at = Some(
+                Instant::now() - std::time::Duration::from_secs_f64(new_position)
+            );
         }
 
         Ok(())
