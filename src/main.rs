@@ -6,8 +6,8 @@ mod ui;
 
 use std::error::Error;
 use std::io;
-use std::time::{ Duration, Instant };
 use std::sync::Arc;
+use std::time::{ Duration, Instant };
 
 use crossterm::event::KeyEvent;
 use crossterm::{
@@ -20,8 +20,8 @@ use ratatui::prelude::*;
 use tokio::main;
 
 use app::{ AppUi, Mode, Source, View };
+use download::{ download_archive_audio, download_youtube_audio };
 use stream::stream_audio;
-use download::{ download_youtube_audio, download_archive_audio };
 use ui::render;
 
 #[main]
@@ -191,7 +191,6 @@ async fn handle_search_results(app: &mut AppUi, key: KeyEvent) -> Result<(), Box
         }
 
         KeyCode::Down => {
-            // There is nothing to select when the search returned no results.
             if app.search_results.is_empty() {
                 app.selected_result_index = None;
             } else {
@@ -221,9 +220,9 @@ async fn handle_search_results(app: &mut AppUi, key: KeyEvent) -> Result<(), Box
 
                     let visualization_data = Arc::clone(&app.visualization_data);
 
-                    let ffplay_process = stream_audio(&identifier, visualization_data)?;
+                    let stream_process = stream_audio(&identifier, visualization_data)?;
 
-                    app.ffplay_process = Some(ffplay_process);
+                    app.stream_process = Some(stream_process);
                     app.paused = false;
                 }
 
