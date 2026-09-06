@@ -3,6 +3,7 @@ mod search;
 mod stream;
 mod download;
 mod ui;
+mod visualizer;
 
 use std::error::Error;
 use std::io;
