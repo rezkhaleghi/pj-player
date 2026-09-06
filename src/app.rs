@@ -294,40 +294,51 @@ fn resume_process(pid: u32) -> Result<(), Box<dyn Error>> {
 /// Each window gets an RMS amplitude value and is converted
 /// into a 0-10 level for the terminal equalizer.
 fn update_visualization(audio_data: &[u8], visualization_data: &Arc<Mutex<Vec<u8>>>) {
-    if audio_data.len() < 2 {
+    // Stereo s16le audio uses 2 bytes per sample
+    // and 2 samples (left + right) per audio frame.
+    const BYTES_PER_SAMPLE: usize = 2;
+    const CHANNELS: usize = 2;
+    const BYTES_PER_FRAME: usize = BYTES_PER_SAMPLE * CHANNELS;
+
+    if audio_data.len() < BYTES_PER_FRAME {
         return;
     }
 
-    let sample_count = audio_data.len() / 2;
+    let frame_count = audio_data.len() / BYTES_PER_FRAME;
 
-    if sample_count == 0 {
+    if frame_count == 0 {
         return;
     }
 
-    let samples_per_bar = sample_count.div_ceil(VISUALIZATION_BAR_COUNT);
+    let frames_per_bar = frame_count.div_ceil(VISUALIZATION_BAR_COUNT);
 
     let mut levels = vec![0u8; VISUALIZATION_BAR_COUNT];
 
     for (bar, level) in levels.iter_mut().enumerate() {
-        let start_sample = bar * samples_per_bar;
-        let end_sample = ((bar + 1) * samples_per_bar).min(sample_count);
+        let start_frame = bar * frames_per_bar;
+        let end_frame = ((bar + 1) * frames_per_bar).min(frame_count);
 
-        if start_sample >= end_sample {
+        if start_frame >= end_frame {
             continue;
         }
 
-        let start_byte = start_sample * 2;
-        let end_byte = end_sample * 2;
+        let start_byte = start_frame * BYTES_PER_FRAME;
+        let end_byte = end_frame * BYTES_PER_FRAME;
 
         let mut sum = 0.0f64;
         let mut count = 0usize;
 
-        for chunk in audio_data[start_byte..end_byte].chunks_exact(2) {
-            let sample = i16::from_le_bytes([chunk[0], chunk[1]]);
+        for frame in audio_data[start_byte..end_byte].chunks_exact(BYTES_PER_FRAME) {
+            let left = i16::from_le_bytes([frame[0], frame[1]]);
+            let right = i16::from_le_bytes([frame[2], frame[3]]);
 
-            let normalized = (sample as f64) / (i16::MAX as f64);
+            let left = (left as f64) / (i16::MAX as f64);
+            let right = (right as f64) / (i16::MAX as f64);
 
-            sum += normalized * normalized;
+            // Average the two stereo channels into one amplitude value.
+            let sample = (left + right) / 2.0;
+
+            sum += sample * sample;
             count += 1;
         }
 
@@ -337,7 +348,7 @@ fn update_visualization(audio_data: &[u8], visualization_data: &Arc<Mutex<Vec<u8
 
         let rms = (sum / (count as f64)).sqrt();
 
-        // Boost quieter audio so the visualization remains visible.
+        // Boost quieter audio while keeping the result in 0..10.
         let value = (rms * 20.0).round().clamp(0.0, 10.0);
 
         *level = value as u8;
@@ -347,7 +358,6 @@ fn update_visualization(audio_data: &[u8], visualization_data: &Arc<Mutex<Vec<u8
         *data = levels;
     }
 }
-
 fn reset_visualization(visualization_data: &Arc<Mutex<Vec<u8>>>) {
     if let Ok(mut data) = visualization_data.lock() {
         data.fill(0);
