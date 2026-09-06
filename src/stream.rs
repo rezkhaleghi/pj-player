@@ -2,7 +2,7 @@
 
 use std::error::Error;
 use std::process::Command;
-use std::sync::{ Arc, Mutex };
+use std::sync::{ atomic::{ AtomicBool, Ordering }, Arc, Mutex };
 use std::thread;
 use std::time::Duration;
 
@@ -18,7 +18,7 @@ pub struct StreamInfo {
 
 /// Starts a YouTube audio stream.
 ///
-/// The new pipeline is:
+/// The pipeline is:
 ///
 ///     YouTube
 ///        ↓
@@ -82,17 +82,28 @@ pub fn stream_audio(
 
     println!("Streaming: {}", title);
 
+    // This flag controls the lifetime of the visualizer worker.
+    //
+    // The StreamProcess owns the flag, so stopping the stream
+    // automatically tells the visualizer thread to exit.
+    let visualizer_running = Arc::new(AtomicBool::new(true));
+
     // Start ffplay directly from the media URL.
-    let stream_process = StreamProcess::start(direct_url.clone(), 0.0)?;
+    let stream_process = StreamProcess::start(
+        direct_url.clone(),
+        0.0,
+        Arc::clone(&visualizer_running)
+    )?;
 
     // Keep the existing visualizer temporarily.
     //
     // This is still fake visualization data and will be replaced
     // in the visualization step later.
     let visualization_data_clone = Arc::clone(&visualization_data);
+    let visualizer_running_clone = Arc::clone(&visualizer_running);
 
     thread::spawn(move || {
-        loop {
+        while visualizer_running_clone.load(Ordering::Relaxed) {
             let Ok(mut data) = visualization_data_clone.lock() else {
                 return;
             };

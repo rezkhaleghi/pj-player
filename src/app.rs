@@ -2,8 +2,8 @@
 
 use std::error::Error;
 use std::process::{ Child, Command };
-use std::sync::{ Arc, Mutex };
-use std::time::Instant;
+use std::sync::{ atomic::{ AtomicBool, Ordering }, Arc, Mutex };
+use std::time::{ Duration, Instant };
 
 use crate::search::{ search_archive, search_youtube };
 
@@ -47,6 +47,7 @@ pub struct SearchResult {
 pub struct StreamProcess {
     ffplay: Child,
     direct_url: String,
+    visualizer_running: Arc<AtomicBool>,
 }
 
 impl StreamProcess {
@@ -54,7 +55,11 @@ impl StreamProcess {
     ///
     /// `position` is the position in seconds from which playback
     /// should begin.
-    pub fn start(direct_url: String, position: f64) -> Result<Self, Box<dyn Error>> {
+    pub fn start(
+        direct_url: String,
+        position: f64,
+        visualizer_running: Arc<AtomicBool>
+    ) -> Result<Self, Box<dyn Error>> {
         let ffplay = Command::new(FFMPEG_PATH)
             .args([
                 "-nodisp",
@@ -70,6 +75,7 @@ impl StreamProcess {
         Ok(Self {
             ffplay,
             direct_url,
+            visualizer_running,
         })
     }
 
@@ -78,8 +84,10 @@ impl StreamProcess {
         self.ffplay.id()
     }
 
-    /// Stops ffplay and waits for it to exit.
+    /// Stops ffplay and signals the visualizer thread to stop.
     pub fn stop(mut self) {
+        self.visualizer_running.store(false, Ordering::Relaxed);
+
         let _ = self.ffplay.kill();
         let _ = self.ffplay.wait();
     }
@@ -215,7 +223,7 @@ impl AppUi {
 
     /// Updates the current playback position.
     ///
-    /// This is called by the main event loop before rendering.
+    /// This is called by the main event loop before rendering the UI.
     pub fn update_playback_position(&mut self) {
         if self.current_view != View::Streaming || self.paused {
             return;
@@ -255,7 +263,7 @@ impl AppUi {
             self.paused = false;
 
             self.playback_started_at = Some(
-                Instant::now() - std::time::Duration::from_secs_f64(self.position)
+                Instant::now() - Duration::from_secs_f64(self.position)
             );
         } else {
             // Update the position before pausing.
@@ -307,9 +315,7 @@ impl AppUi {
             stream_process.pause()?;
             self.playback_started_at = None;
         } else {
-            self.playback_started_at = Some(
-                Instant::now() - std::time::Duration::from_secs_f64(new_position)
-            );
+            self.playback_started_at = Some(Instant::now() - Duration::from_secs_f64(new_position));
         }
 
         Ok(())
