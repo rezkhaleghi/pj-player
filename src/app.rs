@@ -1,12 +1,15 @@
-use std::error::Error;
-use std::io::{ Read, Write };
-use std::process::{ Child, Command, Stdio };
-use std::sync::{ atomic::{ AtomicBool, Ordering }, Arc, Mutex };
-use std::thread::{ self, JoinHandle };
+use crate::error::AppError;
+use std::io::{Read, Write};
+use std::process::{Child, Command, Stdio};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
+use std::thread::{self, JoinHandle};
 use std::time::Instant;
 
-use crate::search::{ search_archive, search_youtube };
-use crate::visualizer::{ Visualizer, VISUALIZATION_BAR_COUNT };
+use crate::search::{search_archive, search_youtube};
+use crate::visualizer::{Visualizer, VISUALIZATION_BAR_COUNT};
 
 const FFMPEG_PATH: &str = "ffmpeg";
 const FFPLAY_PATH: &str = "ffplay";
@@ -74,8 +77,8 @@ impl StreamProcess {
     pub fn start(
         direct_url: String,
         position: f64,
-        visualization_data: Arc<Mutex<Vec<u8>>>
-    ) -> Result<Self, Box<dyn Error>> {
+        visualization_data: Arc<Mutex<Vec<u8>>>,
+    ) -> Result<Self, AppError> {
         reset_visualization(&visualization_data);
 
         let visualizer_running = Arc::new(AtomicBool::new(true));
@@ -84,7 +87,7 @@ impl StreamProcess {
             &direct_url,
             position,
             Arc::clone(&visualization_data),
-            Arc::clone(&visualizer_running)
+            Arc::clone(&visualizer_running),
         )?;
 
         Ok(Self {
@@ -101,8 +104,8 @@ impl StreamProcess {
         direct_url: &str,
         position: f64,
         visualization_data: Arc<Mutex<Vec<u8>>>,
-        visualizer_running: Arc<AtomicBool>
-    ) -> Result<(Child, Child, JoinHandle<()>), Box<dyn Error>> {
+        visualizer_running: Arc<AtomicBool>,
+    ) -> Result<(Child, Child, JoinHandle<()>), AppError> {
         let position = position.to_string();
 
         let mut ffmpeg = Command::new(FFMPEG_PATH)
@@ -127,26 +130,25 @@ impl StreamProcess {
             .stderr(Stdio::null())
             .spawn()?;
 
-        let mut ffplay = match
-            Command::new(FFPLAY_PATH)
-                .args([
-                    "-nodisp",
-                    "-autoexit",
-                    "-loglevel",
-                    "warning",
-                    "-f",
-                    AUDIO_FORMAT,
-                    "-ar",
-                    AUDIO_SAMPLE_RATE,
-                    "-ch_layout",
-                    "stereo",
-                    "-i",
-                    "pipe:0",
-                ])
-                .stdin(Stdio::piped())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
+        let mut ffplay = match Command::new(FFPLAY_PATH)
+            .args([
+                "-nodisp",
+                "-autoexit",
+                "-loglevel",
+                "warning",
+                "-f",
+                AUDIO_FORMAT,
+                "-ar",
+                AUDIO_SAMPLE_RATE,
+                "-ch_layout",
+                "stereo",
+                "-i",
+                "pipe:0",
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
         {
             Ok(process) => process,
             Err(error) => {
@@ -157,9 +159,15 @@ impl StreamProcess {
             }
         };
 
-        let mut ffmpeg_stdout = ffmpeg.stdout.take().ok_or("Failed to access ffmpeg stdout")?;
+        let mut ffmpeg_stdout = ffmpeg
+            .stdout
+            .take()
+            .ok_or_else(|| AppError::Message("Failed to access ffmpeg stdout".to_string()))?;
 
-        let mut ffplay_stdin = ffplay.stdin.take().ok_or("Failed to access ffplay stdin")?;
+        let mut ffplay_stdin = ffplay
+            .stdin
+            .take()
+            .ok_or_else(|| AppError::Message("Failed to access ffplay stdin".to_string()))?;
 
         let audio_thread = thread::spawn(move || {
             let mut buffer = vec![0u8; 16 * 1024];
@@ -193,7 +201,7 @@ impl StreamProcess {
     ///
     /// ffmpeg can finish producing audio before ffplay finishes
     /// playing it, so playback lifecycle is determined by ffplay.
-    pub fn try_wait(&mut self) -> Result<bool, Box<dyn Error>> {
+    pub fn try_wait(&mut self) -> Result<bool, AppError> {
         Ok(self.ffplay.try_wait()?.is_some())
     }
 
@@ -213,14 +221,14 @@ impl StreamProcess {
         reset_visualization(&self.visualization_data);
     }
 
-    pub fn pause(&self) -> Result<(), Box<dyn Error>> {
+    pub fn pause(&self) -> Result<(), AppError> {
         pause_process(self.ffmpeg.id())?;
         pause_process(self.ffplay.id())?;
 
         Ok(())
     }
 
-    pub fn resume(&self) -> Result<(), Box<dyn Error>> {
+    pub fn resume(&self) -> Result<(), AppError> {
         resume_process(self.ffmpeg.id())?;
         resume_process(self.ffplay.id())?;
 
@@ -228,7 +236,7 @@ impl StreamProcess {
     }
 
     /// Restarts both ffmpeg and ffplay at the requested position.
-    pub fn seek(&mut self, position: f64) -> Result<(), Box<dyn Error>> {
+    pub fn seek(&mut self, position: f64) -> Result<(), AppError> {
         self.visualizer_running.store(false, Ordering::Relaxed);
 
         let _ = self.ffmpeg.kill();
@@ -245,14 +253,12 @@ impl StreamProcess {
 
         self.visualizer_running.store(true, Ordering::Relaxed);
 
-        let (ffmpeg, ffplay, audio_thread) = match
-            Self::spawn_pipeline(
-                &self.direct_url,
-                position,
-                Arc::clone(&self.visualization_data),
-                Arc::clone(&self.visualizer_running)
-            )
-        {
+        let (ffmpeg, ffplay, audio_thread) = match Self::spawn_pipeline(
+            &self.direct_url,
+            position,
+            Arc::clone(&self.visualization_data),
+            Arc::clone(&self.visualizer_running),
+        ) {
             Ok(result) => result,
             Err(error) => {
                 self.visualizer_running.store(false, Ordering::Relaxed);
@@ -269,23 +275,35 @@ impl StreamProcess {
     }
 }
 
-fn pause_process(pid: u32) -> Result<(), Box<dyn Error>> {
-    let status = Command::new("kill").args(["-s", "STOP", &pid.to_string()]).status()?;
+fn pause_process(pid: u32) -> Result<(), AppError> {
+    let status = Command::new("kill")
+        .args(["-s", "STOP", &pid.to_string()])
+        .status()?;
 
     if status.success() {
         Ok(())
     } else {
-        Err(format!("Failed to pause process {}", pid).into())
+        Err(AppError::Process {
+            command: format!("kill -s STOP {}", pid),
+            status: status.code(),
+            stderr: String::new(),
+        })
     }
 }
 
-fn resume_process(pid: u32) -> Result<(), Box<dyn Error>> {
-    let status = Command::new("kill").args(["-s", "CONT", &pid.to_string()]).status()?;
+fn resume_process(pid: u32) -> Result<(), AppError> {
+    let status = Command::new("kill")
+        .args(["-s", "CONT", &pid.to_string()])
+        .status()?;
 
     if status.success() {
         Ok(())
     } else {
-        Err(format!("Failed to resume process {}", pid).into())
+        Err(AppError::Process {
+            command: format!("kill -s CONT {}", pid),
+            status: status.code(),
+            stderr: String::new(),
+        })
     }
 }
 
@@ -350,15 +368,19 @@ impl AppUi {
         }
     }
 
-    pub async fn search(&mut self) -> Result<(), Box<dyn Error>> {
+    pub async fn search(&mut self) -> Result<(), AppError> {
         self.search_results = match self.source {
-            Source::YouTube => { search_youtube(&self.search_input).await? }
-            Source::InternetArchive => { search_archive(&self.search_input).await? }
+            Source::YouTube => search_youtube(&self.search_input).await?,
+            Source::InternetArchive => search_archive(&self.search_input).await?,
         };
 
         self.current_view = View::SearchResults;
 
-        self.selected_result_index = if self.search_results.is_empty() { None } else { Some(0) };
+        self.selected_result_index = if self.search_results.is_empty() {
+            None
+        } else {
+            Some(0)
+        };
 
         Ok(())
     }
@@ -388,7 +410,7 @@ impl AppUi {
     }
 
     /// Detects when ffplay exits naturally.
-    pub fn update_stream_lifecycle(&mut self) -> Result<(), Box<dyn Error>> {
+    pub fn update_stream_lifecycle(&mut self) -> Result<(), AppError> {
         let finished = if let Some(stream_process) = &mut self.stream_process {
             stream_process.try_wait()?
         } else {
@@ -417,13 +439,16 @@ impl AppUi {
         self.playback_base_position = 0.0;
     }
 
-    pub fn toggle_pause(&mut self) -> Result<(), Box<dyn Error>> {
+    pub fn toggle_pause(&mut self) -> Result<(), AppError> {
         if self.stream_process.is_none() {
-            return Err("No stream process running".into());
+            return Err(AppError::Message("No stream process running".to_string()));
         }
 
         if self.paused {
-            self.stream_process.as_ref().ok_or("No stream process running")?.resume()?;
+            self.stream_process
+                .as_ref()
+                .ok_or_else(|| AppError::Message("No stream process running".to_string()))?
+                .resume()?;
 
             self.paused = false;
             self.playback_base_position = self.position;
@@ -431,7 +456,10 @@ impl AppUi {
         } else {
             self.update_playback_position();
 
-            self.stream_process.as_ref().ok_or("No stream process running")?.pause()?;
+            self.stream_process
+                .as_ref()
+                .ok_or_else(|| AppError::Message("No stream process running".to_string()))?
+                .pause()?;
 
             self.paused = true;
             self.playback_started_at = None;
@@ -440,15 +468,15 @@ impl AppUi {
         Ok(())
     }
 
-    pub fn seek_forward(&mut self) -> Result<(), Box<dyn Error>> {
+    pub fn seek_forward(&mut self) -> Result<(), AppError> {
         self.seek_by(15.0)
     }
 
-    pub fn seek_backward(&mut self) -> Result<(), Box<dyn Error>> {
+    pub fn seek_backward(&mut self) -> Result<(), AppError> {
         self.seek_by(-15.0)
     }
 
-    fn seek_by(&mut self, amount: f64) -> Result<(), Box<dyn Error>> {
+    fn seek_by(&mut self, amount: f64) -> Result<(), AppError> {
         self.update_playback_position();
 
         let mut new_position = self.position + amount;
@@ -460,7 +488,7 @@ impl AppUi {
         }
 
         let Some(stream_process) = &mut self.stream_process else {
-            return Err("No stream process running".into());
+            return Err(AppError::Message("No stream process running".to_string()));
         };
 
         stream_process.seek(new_position)?;

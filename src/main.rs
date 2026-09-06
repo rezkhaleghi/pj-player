@@ -1,32 +1,33 @@
 mod app;
+mod download;
+mod error;
 mod search;
 mod stream;
-mod download;
 mod ui;
 mod visualizer;
 
-use std::error::Error;
 use std::io;
 use std::sync::Arc;
-use std::time::{ Duration, Instant };
+use std::time::{Duration, Instant};
 
 use crossterm::event::KeyEvent;
 use crossterm::{
-    event::{ self, Event, KeyCode },
+    event::{self, Event, KeyCode},
     execute,
-    terminal::{ disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen },
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 
 use ratatui::prelude::*;
 use tokio::main;
 
-use app::{ AppUi, Mode, Source, View };
-use download::{ download_archive_audio, download_youtube_audio };
+use app::{AppUi, Mode, Source, View};
+use download::{download_archive_audio, download_youtube_audio};
+use error::AppError;
 use stream::stream_audio;
 use ui::render;
 
 #[main]
-async fn main() -> Result<(), Box<dyn Error>> {
+async fn main() -> Result<(), AppError> {
     enable_raw_mode()?;
 
     let mut stdout = io::stdout();
@@ -49,8 +50,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
 async fn run_app(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    app: &mut AppUi
-) -> Result<(), Box<dyn Error>> {
+    app: &mut AppUi,
+) -> Result<(), AppError> {
     let tick_rate = Duration::from_millis(250);
     let mut last_tick = Instant::now();
 
@@ -58,7 +59,7 @@ async fn run_app(
         app.update_stream_lifecycle()?;
         app.update_playback_position();
 
-        terminal.draw(|frame| render(&app, frame))?;
+        terminal.draw(|frame| render(app, frame))?;
 
         let timeout = tick_rate
             .checked_sub(last_tick.elapsed())
@@ -66,9 +67,10 @@ async fn run_app(
 
         if crossterm::event::poll(timeout)? {
             if let Event::Key(key) = event::read()? {
-                if
-                    key.code == KeyCode::Char('c') &&
-                    key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL)
+                if key.code == KeyCode::Char('c')
+                    && key
+                        .modifiers
+                        .contains(crossterm::event::KeyModifiers::CONTROL)
                 {
                     break;
                 }
@@ -85,7 +87,7 @@ async fn run_app(
     Ok(())
 }
 
-async fn handle_key_event(app: &mut AppUi, key: KeyEvent) -> Result<(), Box<dyn Error>> {
+async fn handle_key_event(app: &mut AppUi, key: KeyEvent) -> Result<(), AppError> {
     match app.current_view {
         View::SearchInput => handle_search_input(app, key).await,
         View::InitialSelection => handle_initial_selection(app, key).await,
@@ -96,7 +98,7 @@ async fn handle_key_event(app: &mut AppUi, key: KeyEvent) -> Result<(), Box<dyn 
     }
 }
 
-async fn handle_search_input(app: &mut AppUi, key: KeyEvent) -> Result<(), Box<dyn Error>> {
+async fn handle_search_input(app: &mut AppUi, key: KeyEvent) -> Result<(), AppError> {
     match key.code {
         KeyCode::Enter | KeyCode::Right => {
             app.current_view = View::InitialSelection;
@@ -116,36 +118,34 @@ async fn handle_search_input(app: &mut AppUi, key: KeyEvent) -> Result<(), Box<d
     Ok(())
 }
 
-async fn handle_initial_selection(app: &mut AppUi, key: KeyEvent) -> Result<(), Box<dyn Error>> {
+async fn handle_initial_selection(app: &mut AppUi, key: KeyEvent) -> Result<(), AppError> {
     match key.code {
         KeyCode::Up => {
-            app.selected_result_index = Some(
-                app.selected_result_index.unwrap_or(0).saturating_sub(1)
-            );
+            app.selected_result_index =
+                Some(app.selected_result_index.unwrap_or(0).saturating_sub(1));
         }
 
         KeyCode::Down => {
             app.selected_result_index = Some((app.selected_result_index.unwrap_or(0) + 1).min(1));
         }
 
-        KeyCode::Enter | KeyCode::Right =>
-            match app.selected_result_index {
-                Some(0) => {
-                    app.mode = Some(Mode::Stream);
-                    app.source = Source::YouTube;
+        KeyCode::Enter | KeyCode::Right => match app.selected_result_index {
+            Some(0) => {
+                app.mode = Some(Mode::Stream);
+                app.source = Source::YouTube;
 
-                    app.search().await?;
+                app.search().await?;
 
-                    app.current_view = View::SearchResults;
-                }
-
-                Some(1) => {
-                    app.mode = Some(Mode::Download);
-                    app.current_view = View::SourceSelection;
-                }
-
-                _ => {}
+                app.current_view = View::SearchResults;
             }
+
+            Some(1) => {
+                app.mode = Some(Mode::Download);
+                app.current_view = View::SourceSelection;
+            }
+
+            _ => {}
+        },
 
         KeyCode::Left => {
             app.current_view = View::SearchInput;
@@ -157,7 +157,7 @@ async fn handle_initial_selection(app: &mut AppUi, key: KeyEvent) -> Result<(), 
     Ok(())
 }
 
-async fn handle_source_selection(app: &mut AppUi, key: KeyEvent) -> Result<(), Box<dyn Error>> {
+async fn handle_source_selection(app: &mut AppUi, key: KeyEvent) -> Result<(), AppError> {
     match key.code {
         KeyCode::Up => {
             app.selected_source_index = app.selected_source_index.saturating_sub(1);
@@ -189,7 +189,7 @@ async fn handle_source_selection(app: &mut AppUi, key: KeyEvent) -> Result<(), B
     Ok(())
 }
 
-async fn handle_search_results(app: &mut AppUi, key: KeyEvent) -> Result<(), Box<dyn Error>> {
+async fn handle_search_results(app: &mut AppUi, key: KeyEvent) -> Result<(), AppError> {
     match key.code {
         KeyCode::Up => {
             if let Some(idx) = &mut app.selected_result_index {
@@ -230,10 +230,8 @@ async fn handle_search_results(app: &mut AppUi, key: KeyEvent) -> Result<(), Box
 
                     let visualization_data = Arc::clone(&app.visualization_data);
 
-                    let (stream_process, stream_info) = stream_audio(
-                        &identifier,
-                        visualization_data
-                    )?;
+                    let (stream_process, stream_info) =
+                        stream_audio(&identifier, visualization_data)?;
 
                     app.stream_process = Some(stream_process);
 
@@ -248,7 +246,7 @@ async fn handle_search_results(app: &mut AppUi, key: KeyEvent) -> Result<(), Box
                             download_youtube_audio(
                                 identifier,
                                 title,
-                                Arc::clone(&app.download_status)
+                                Arc::clone(&app.download_status),
                             );
                         }
 
@@ -256,7 +254,7 @@ async fn handle_search_results(app: &mut AppUi, key: KeyEvent) -> Result<(), Box
                             download_archive_audio(
                                 identifier,
                                 title,
-                                Arc::clone(&app.download_status)
+                                Arc::clone(&app.download_status),
                             );
                         }
                     }
@@ -266,18 +264,17 @@ async fn handle_search_results(app: &mut AppUi, key: KeyEvent) -> Result<(), Box
             }
         }
 
-        KeyCode::Left =>
-            match app.mode {
-                Some(Mode::Stream) => {
-                    app.current_view = View::InitialSelection;
-                }
-
-                Some(Mode::Download) => {
-                    app.current_view = View::SourceSelection;
-                }
-
-                _ => {}
+        KeyCode::Left => match app.mode {
+            Some(Mode::Stream) => {
+                app.current_view = View::InitialSelection;
             }
+
+            Some(Mode::Download) => {
+                app.current_view = View::SourceSelection;
+            }
+
+            _ => {}
+        },
 
         _ => {}
     }
@@ -285,7 +282,7 @@ async fn handle_search_results(app: &mut AppUi, key: KeyEvent) -> Result<(), Box
     Ok(())
 }
 
-async fn handle_streaming(app: &mut AppUi, key: KeyEvent) -> Result<(), Box<dyn Error>> {
+async fn handle_streaming(app: &mut AppUi, key: KeyEvent) -> Result<(), AppError> {
     match key.code {
         KeyCode::Esc => {
             app.stop_streaming();
@@ -318,13 +315,13 @@ async fn handle_streaming(app: &mut AppUi, key: KeyEvent) -> Result<(), Box<dyn 
     Ok(())
 }
 
-async fn handle_downloading(app: &mut AppUi, key: KeyEvent) -> Result<(), Box<dyn Error>> {
+async fn handle_downloading(app: &mut AppUi, key: KeyEvent) -> Result<(), AppError> {
     if key.code == KeyCode::Left || key.code == KeyCode::Esc {
         app.current_view = View::SearchResults;
 
-        let mut download_status = app.download_status.lock().unwrap();
-
-        *download_status = None;
+        if let Ok(mut download_status) = app.download_status.lock() {
+            *download_status = None;
+        }
     }
 
     Ok(())

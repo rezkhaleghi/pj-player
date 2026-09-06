@@ -1,4 +1,4 @@
-use std::sync::{ Arc, Mutex };
+use std::sync::{Arc, Mutex};
 
 const BYTES_PER_SAMPLE: usize = 2;
 const CHANNELS: usize = 2;
@@ -12,13 +12,13 @@ const AMPLITUDE_BOOST: f64 = 20.0;
 
 /// Maintains the smoothed state of the audio visualization.
 pub struct Visualizer {
-    levels: Vec<f64>,
+    levels: [f64; VISUALIZATION_BAR_COUNT],
 }
 
 impl Visualizer {
     pub fn new() -> Self {
         Self {
-            levels: vec![0.0; VISUALIZATION_BAR_COUNT],
+            levels: [0.0; VISUALIZATION_BAR_COUNT],
         }
     }
 
@@ -36,7 +36,11 @@ impl Visualizer {
 
         let frames_per_bar = frame_count.div_ceil(VISUALIZATION_BAR_COUNT);
 
-        let mut target_levels = vec![0.0f64; VISUALIZATION_BAR_COUNT];
+        let mut target_levels = [0.0f64; VISUALIZATION_BAR_COUNT];
+
+        let frames = audio_data[..frame_count * BYTES_PER_FRAME]
+            .as_chunks::<BYTES_PER_FRAME>()
+            .0;
 
         for (bar, level) in target_levels.iter_mut().enumerate() {
             let start_frame = bar * frames_per_bar;
@@ -46,13 +50,10 @@ impl Visualizer {
                 continue;
             }
 
-            let start_byte = start_frame * BYTES_PER_FRAME;
-            let end_byte = end_frame * BYTES_PER_FRAME;
-
             let mut sum = 0.0f64;
             let mut count = 0usize;
 
-            for frame in audio_data[start_byte..end_byte].chunks_exact(BYTES_PER_FRAME) {
+            for frame in &frames[start_frame..end_frame] {
                 let left = i16::from_le_bytes([frame[0], frame[1]]);
                 let right = i16::from_le_bytes([frame[2], frame[3]]);
 
