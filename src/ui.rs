@@ -1,3 +1,4 @@
+//ui.rs
 use ratatui::{ prelude::*, widgets::*, layout::{ Layout, Direction, Constraint } };
 use crate::app::{ AppUi, View };
 

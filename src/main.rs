@@ -8,12 +8,14 @@ use std::error::Error;
 use std::io;
 use std::time::{ Duration, Instant };
 use std::sync::Arc;
+
 use crossterm::event::KeyEvent;
 use crossterm::{
     event::{ self, Event, KeyCode },
     execute,
     terminal::{ disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen },
 };
+
 use ratatui::prelude::*;
 use tokio::main;
 
@@ -25,12 +27,16 @@ use ui::render;
 #[main]
 async fn main() -> Result<(), Box<dyn Error>> {
     enable_raw_mode()?;
+
     let mut stdout = io::stdout();
+
     execute!(stdout, EnterAlternateScreen)?;
+
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
     let mut app = AppUi::new();
+
     let tick_rate = Duration::from_millis(250);
     let mut last_tick = Instant::now();
 
@@ -50,6 +56,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 {
                     break;
                 }
+
                 handle_key_event(&mut app, key).await?;
             }
         }
@@ -82,14 +89,18 @@ async fn handle_search_input(app: &mut AppUi, key: KeyEvent) -> Result<(), Box<d
         KeyCode::Enter | KeyCode::Right => {
             app.current_view = View::InitialSelection;
         }
+
         KeyCode::Char(c) => {
             app.search_input.push(c);
         }
+
         KeyCode::Backspace => {
             app.search_input.pop();
         }
+
         _ => {}
     }
+
     Ok(())
 }
 
@@ -100,29 +111,38 @@ async fn handle_initial_selection(app: &mut AppUi, key: KeyEvent) -> Result<(), 
                 app.selected_result_index.unwrap_or(0).saturating_sub(1)
             );
         }
+
         KeyCode::Down => {
             app.selected_result_index = Some((app.selected_result_index.unwrap_or(0) + 1).min(1));
         }
+
         KeyCode::Enter | KeyCode::Right => {
             match app.selected_result_index {
                 Some(0) => {
                     app.mode = Some(Mode::Stream);
                     app.source = Source::YouTube;
+
                     app.search().await?;
+
                     app.current_view = View::SearchResults;
                 }
+
                 Some(1) => {
                     app.mode = Some(Mode::Download);
                     app.current_view = View::SourceSelection;
                 }
+
                 _ => {}
             }
         }
+
         KeyCode::Left => {
             app.current_view = View::SearchInput;
         }
+
         _ => {}
     }
+
     Ok(())
 }
 
@@ -131,23 +151,30 @@ async fn handle_source_selection(app: &mut AppUi, key: KeyEvent) -> Result<(), B
         KeyCode::Up => {
             app.selected_source_index = app.selected_source_index.saturating_sub(1);
         }
+
         KeyCode::Down => {
             app.selected_source_index = (app.selected_source_index + 1).min(1);
         }
+
         KeyCode::Enter | KeyCode::Right => {
             app.source = match app.selected_source_index {
                 0 => Source::YouTube,
                 1 => Source::InternetArchive,
                 _ => Source::YouTube,
             };
+
             app.search().await?;
+
             app.current_view = View::SearchResults;
         }
+
         KeyCode::Left => {
             app.current_view = View::InitialSelection;
         }
+
         _ => {}
     }
+
     Ok(())
 }
 
@@ -162,63 +189,87 @@ async fn handle_search_results(app: &mut AppUi, key: KeyEvent) -> Result<(), Box
                 }
             }
         }
+
         KeyCode::Down => {
-            if let Some(mut idx) = app.selected_result_index {
-                idx = (idx + 1).min(app.search_results.len() - 1);
-                app.selected_result_index = Some(idx);
+            // There is nothing to select when the search returned no results.
+            if app.search_results.is_empty() {
+                app.selected_result_index = None;
+            } else {
+                let current_index = app.selected_result_index.unwrap_or(0);
+
+                let next_index = (current_index + 1).min(app.search_results.len() - 1);
+
+                app.selected_result_index = Some(next_index);
             }
         }
+
         KeyCode::Enter | KeyCode::Right => {
-            if let Some(index) = app.selected_result_index {
-                let selected = &app.search_results[index];
-                match app.mode {
-                    Some(Mode::Stream) => {
-                        app.current_view = View::Streaming;
-                        let identifier = selected.identifier.clone();
-                        let visualization_data = Arc::clone(&app.visualization_data);
-                        let ffplay_process = stream_audio(
-                            &identifier,
-                            visualization_data /* third_argument */
-                        )?;
-                        app.ffplay_process = Some(ffplay_process);
-                        app.paused = false;
-                    }
-                    Some(Mode::Download) => {
-                        app.current_view = View::Downloading;
-                        match app.source {
-                            Source::YouTube => {
-                                download_youtube_audio(
-                                    selected.identifier.clone(),
-                                    selected.title.clone(),
-                                    Arc::clone(&app.download_status)
-                                );
-                            }
-                            Source::InternetArchive => {
-                                download_archive_audio(
-                                    selected.identifier.clone(),
-                                    selected.title.clone(),
-                                    Arc::clone(&app.download_status)
-                                );
-                            }
+            let Some(index) = app.selected_result_index else {
+                return Ok(());
+            };
+
+            let Some(selected) = app.search_results.get(index) else {
+                return Ok(());
+            };
+
+            let identifier = selected.identifier.clone();
+            let title = selected.title.clone();
+
+            match app.mode {
+                Some(Mode::Stream) => {
+                    app.current_view = View::Streaming;
+
+                    let visualization_data = Arc::clone(&app.visualization_data);
+
+                    let ffplay_process = stream_audio(&identifier, visualization_data)?;
+
+                    app.ffplay_process = Some(ffplay_process);
+                    app.paused = false;
+                }
+
+                Some(Mode::Download) => {
+                    app.current_view = View::Downloading;
+
+                    match app.source {
+                        Source::YouTube => {
+                            download_youtube_audio(
+                                identifier,
+                                title,
+                                Arc::clone(&app.download_status)
+                            );
+                        }
+
+                        Source::InternetArchive => {
+                            download_archive_audio(
+                                identifier,
+                                title,
+                                Arc::clone(&app.download_status)
+                            );
                         }
                     }
-                    _ => {}
                 }
+
+                _ => {}
             }
         }
+
         KeyCode::Left => {
             match app.mode {
                 Some(Mode::Stream) => {
                     app.current_view = View::InitialSelection;
                 }
+
                 Some(Mode::Download) => {
                     app.current_view = View::SourceSelection;
                 }
+
                 _ => {}
             }
         }
+
         _ => {}
     }
+
     Ok(())
 }
 
@@ -228,25 +279,33 @@ async fn handle_streaming(app: &mut AppUi, key: KeyEvent) -> Result<(), Box<dyn 
             app.stop_streaming();
             app.current_view = View::SearchResults;
         }
+
         KeyCode::Char(' ') => {
             app.toggle_pause()?;
         }
+
         KeyCode::Char(c) if c.is_digit(10) => {
             let digit = c.to_digit(10).unwrap() as usize;
+
             if digit >= 1 && digit <= 6 {
-                app.current_equalizer = digit - 1; // Map 1-6 to 0-5 for equalizer index
+                app.current_equalizer = digit - 1;
             }
         }
+
         _ => {}
     }
+
     Ok(())
 }
 
 async fn handle_downloading(app: &mut AppUi, key: KeyEvent) -> Result<(), Box<dyn Error>> {
     if key.code == KeyCode::Left || key.code == KeyCode::Esc {
         app.current_view = View::SearchResults;
+
         let mut download_status = app.download_status.lock().unwrap();
+
         *download_status = None;
     }
+
     Ok(())
 }

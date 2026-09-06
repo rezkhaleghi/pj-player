@@ -1,3 +1,4 @@
+//app.rs
 use std::error::Error;
 use std::process::{ Child, Command };
 use std::sync::{ Arc, Mutex };
@@ -9,13 +10,13 @@ pub enum Source {
     InternetArchive,
 }
 
-#[derive(PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     Stream,
     Download,
 }
 
-#[derive(PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum View {
     SearchInput,
     SearchResults,
@@ -71,7 +72,7 @@ impl AppUi {
             Source::InternetArchive => search_archive(&self.search_input).await?,
         };
         self.current_view = View::SearchResults;
-        self.selected_result_index = Some(0);
+        self.selected_result_index = if self.search_results.is_empty() { None } else { Some(0) };
         Ok(())
     }
 
