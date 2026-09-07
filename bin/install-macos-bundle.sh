@@ -2,33 +2,33 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-APP_DIR="$ROOT_DIR/target/macos-package/PJ-Player.app"
+APP_DIR="$ROOT_DIR/target/macos-package/pjplayer.app"
 COMMAND_DIR="$ROOT_DIR/target/macos-package/command"
-INSTALL_ROOT="$HOME/.local/share/pj-player"
+INSTALL_ROOT="$HOME/.local/share/pjplayer"
 INSTALL_DIR="$HOME/.local/bin"
 
-if [[ ! -d "$APP_DIR" || ! -x "$COMMAND_DIR/pj-player" ]]; then
+if [[ ! -d "$APP_DIR" || ! -x "$COMMAND_DIR/pjplayer" ]]; then
   "$ROOT_DIR/bin/package-macos.sh"
 fi
 
 mkdir -p "$HOME/Applications" "$INSTALL_DIR"
-rm -rf "$HOME/Applications/PJ-Player.app"
-cp -R "$APP_DIR" "$HOME/Applications/PJ-Player.app"
+rm -rf "$HOME/Applications/pjplayer.app"
+cp -R "$APP_DIR" "$HOME/Applications/pjplayer.app"
 rm -rf "$INSTALL_ROOT"
 mkdir -p "$INSTALL_ROOT"
 cp -R "$COMMAND_DIR/bin" "$INSTALL_ROOT/bin"
-cp "$COMMAND_DIR/pj-player" "$INSTALL_ROOT/pj-player"
-chmod 755 "$INSTALL_ROOT/pj-player" "$INSTALL_ROOT/bin"/*
-ln -sfn "$INSTALL_ROOT/pj-player" "$INSTALL_DIR/pj-player"
+cp "$COMMAND_DIR/pjplayer" "$INSTALL_ROOT/pjplayer"
+chmod 755 "$INSTALL_ROOT/pjplayer" "$INSTALL_ROOT/bin"/*
+ln -sfn "$INSTALL_ROOT/pjplayer" "$INSTALL_DIR/pjplayer"
 
 cat <<EOF
 Installed PJ-Player to:
-  $HOME/Applications/PJ-Player.app
-  $INSTALL_DIR/pj-player
+  $HOME/Applications/pjplayer.app
+  $INSTALL_DIR/pjplayer
 
 Add this directory to PATH if needed:
   export PATH="$INSTALL_DIR:\$PATH"
 
 Then run:
-  pj-player
+  pjplayer
 EOF

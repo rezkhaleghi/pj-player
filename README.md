@@ -11,25 +11,34 @@ Download the release corresponding to your Mac's architecture:
 
 After downloading:
 
-1. Move `PJ-Player.app` to `/Applications`.
+1. Move `pjplayer.app` to `/Applications`.
 2. Double-click it to start PJ-Player in Terminal.
 3. If macOS blocks the unsigned app, right-click it, choose **Open**, and confirm. Alternatively, run:
 
    ```sh
-   xattr -dr com.apple.quarantine /Applications/PJ-Player.app
+   xattr -dr com.apple.quarantine /Applications/pjplayer.app
    ```
 
-To also use PJ-Player with the `pj-player` terminal command, run:
+To also use PJ-Player with the `pjplayer` terminal command, run:
 
 ```sh
 mkdir -p "$HOME/.local/bin"
 
-cat > "$HOME/.local/bin/pj-player" <<'EOF'
+cat > "$HOME/.local/bin/pjplayer" <<'EOF'
 #!/bin/sh
-exec /Applications/PJ-Player.app/Contents/MacOS/pjplayer "$@"
+if [ -x "/Applications/pjplayer.app/Contents/MacOS/pjplayer" ]; then
+   APP_BIN="/Applications/pjplayer.app/Contents/MacOS/pjplayer"
+elif [ -x "$HOME/Applications/pjplayer.app/Contents/MacOS/pjplayer" ]; then
+   APP_BIN="$HOME/Applications/pjplayer.app/Contents/MacOS/pjplayer"
+else
+   echo "pjplayer.app was not found. Move it to /Applications or ~/Applications." >&2
+   exit 1
+fi
+
+exec "$APP_BIN" "$@"
 EOF
 
-chmod +x "$HOME/.local/bin/pj-player"
+chmod +x "$HOME/.local/bin/pjplayer"
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.zshrc"
 source "$HOME/.zshrc"
 ```
@@ -37,10 +46,10 @@ source "$HOME/.zshrc"
 The user can then start PJ-Player from any Terminal window:
 
 ```sh
-pj-player
+pjplayer
 ```
 
-The app must remain at `/Applications/PJ-Player.app` for this terminal command to work. A signed `.pkg` release sets up both the clickable app and terminal command automatically.
+The app must remain at `/Applications/pjplayer.app` or `~/Applications/pjplayer.app` for this terminal command to work. A signed `.pkg` release sets up both the clickable app and terminal command automatically.
 
 # DEMO
 
@@ -108,13 +117,13 @@ These two commands are for the **release builder**, because the first command co
 ./bin/package-macos.sh
 ```
 
-This creates `target/macos-package/PJ-Player.app` and a terminal distribution under `target/macos-package/command`. To install both the clickable app and the `pj-player` terminal command for the current user:
+This creates `target/macos-package/pjplayer.app` and a terminal distribution under `target/macos-package/command`. To install both the clickable app and the `pjplayer` terminal command for the current user:
 
 ```sh
 ./bin/install-macos-bundle.sh
 ```
 
-For end users, distribute the generated `PJ-Player.app` in a signed zip or DMG. They download it, move it to Applications, and double-click it. To provide the terminal command too, distribute the generated `command` directory with an installer package; the end user should not need to run `package-macos.sh`.
+For end users, distribute the generated `pjplayer.app` in a signed zip or DMG. They download it, move it to Applications, and double-click it. To provide the terminal command too, distribute the generated `command` directory with an installer package; the end user should not need to run `package-macos.sh`.
 
 For public distribution, sign and notarize the app with an Apple Developer certificate. Build separate arm64 and x86_64 releases, or provide a universal build, because ffmpeg and ffplay must match the user's Mac architecture.
 
@@ -122,7 +131,7 @@ The current `evermeet.cx` download used by the packaging script provides Intel f
 
 ### One-click installer package
 
-To create a `.pkg` that installs both the clickable app and the `pj-player` terminal command:
+To create a `.pkg` that installs both the clickable app and the `pjplayer` terminal command:
 
 ```sh
 ./bin/package-macos-pkg.sh
@@ -136,14 +145,14 @@ export PJ_PLAYER_INSTALLER_SIGN_IDENTITY="3rd Party Mac Developer Installer: You
 ./bin/package-macos-pkg.sh
 ```
 
-The package installs `PJ-Player.app` into `/Applications` and `pj-player` into `/usr/local/bin`. Configure an app-specific `notarytool` profile, then notarize it with:
+The package installs `pjplayer.app` into `/Applications` and `pjplayer` into `/usr/local/bin`. Configure an app-specific `notarytool` profile, then notarize it with:
 
 ```sh
-export PJ_PLAYER_NOTARY_PROFILE="pj-player-notary"
-./bin/notarize-macos-pkg.sh target/macos-package/PJ-Player.pkg
+export PJ_PLAYER_NOTARY_PROFILE="pjplayer-notary"
+./bin/notarize-macos-pkg.sh target/macos-package/pjplayer.pkg
 ```
 
-Users download the notarized `PJ-Player.pkg`, double-click it, and can then either open PJ-Player from Applications or run `pj-player` in Terminal. The installer asks for an administrator password because it writes to `/Applications` and `/usr/local`.
+Users download the notarized `pjplayer.pkg`, double-click it, and can then either open PJ-Player from Applications or run `pjplayer` in Terminal. The installer asks for an administrator password because it writes to `/Applications` and `/usr/local`.
 
 ## Usage
 

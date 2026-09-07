@@ -3,9 +3,9 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="$ROOT_DIR/target/macos-package"
-APP_DIR="$BUILD_DIR/PJ-Player.app"
+APP_DIR="$BUILD_DIR/pjplayer.app"
 STAGE_DIR="$BUILD_DIR/pkg-root"
-PKG_PATH="$BUILD_DIR/PJ-Player.pkg"
+PKG_PATH="$BUILD_DIR/pjplayer.pkg"
 VERSION="${PJ_PLAYER_VERSION:-0.1.0}"
 APP_SIGN_IDENTITY="${PJ_PLAYER_APP_SIGN_IDENTITY:-}"
 INSTALLER_SIGN_IDENTITY="${PJ_PLAYER_INSTALLER_SIGN_IDENTITY:-}"
@@ -31,12 +31,12 @@ else
 fi
 
 rm -rf "$STAGE_DIR" "$PKG_PATH"
-mkdir -p "$STAGE_DIR/Applications" "$STAGE_DIR/usr/local/lib/pj-player" "$STAGE_DIR/usr/local/bin"
-cp -R "$APP_DIR" "$STAGE_DIR/Applications/PJ-Player.app"
-cp "$BUILD_DIR/command/pj-player" "$STAGE_DIR/usr/local/lib/pj-player/pj-player"
-cp -R "$BUILD_DIR/command/bin/." "$STAGE_DIR/usr/local/lib/pj-player/bin"
-ln -s ../lib/pj-player/pj-player "$STAGE_DIR/usr/local/bin/pj-player"
-chmod 755 "$STAGE_DIR/usr/local/lib/pj-player/pj-player" "$STAGE_DIR/usr/local/lib/pj-player/bin"/*
+mkdir -p "$STAGE_DIR/Applications" "$STAGE_DIR/usr/local/lib/pjplayer" "$STAGE_DIR/usr/local/bin"
+cp -R "$APP_DIR" "$STAGE_DIR/Applications/pjplayer.app"
+cp "$BUILD_DIR/command/pjplayer" "$STAGE_DIR/usr/local/lib/pjplayer/pjplayer"
+cp -R "$BUILD_DIR/command/bin/." "$STAGE_DIR/usr/local/lib/pjplayer/bin"
+ln -s ../lib/pjplayer/pjplayer "$STAGE_DIR/usr/local/bin/pjplayer"
+chmod 755 "$STAGE_DIR/usr/local/lib/pjplayer/pjplayer" "$STAGE_DIR/usr/local/lib/pjplayer/bin"/*
 
 PKGBUILD_ARGS=(
   --root "$STAGE_DIR"
@@ -62,9 +62,9 @@ Created installer:
   $PKG_PATH
 
 It installs:
-  /Applications/PJ-Player.app
-  /usr/local/bin/pj-player
-  /usr/local/lib/pj-player/bin/
+  /Applications/pjplayer.app
+  /usr/local/bin/pjplayer
+  /usr/local/lib/pjplayer/bin/
 
 Test locally with:
   sudo installer -pkg "$PKG_PATH" -target /

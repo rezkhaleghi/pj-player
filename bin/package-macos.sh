@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_NAME="PJ-Player.app"
+APP_NAME="pjplayer.app"
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="$ROOT_DIR/target/macos-package"
 APP_DIR="$BUILD_DIR/$APP_NAME"
@@ -29,13 +29,22 @@ chmod 755 "$CONTENTS_DIR/MacOS/pjplayer"
 
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
-echo "Downloading ffmpeg and ffplay for $ARCH..."
-curl --fail --location "$FFMPEG_URL" --output "$tmp_dir/ffmpeg.zip"
-unzip -q "$tmp_dir/ffmpeg.zip" -d "$tmp_dir/ffmpeg"
-cp "$tmp_dir/ffmpeg/ffmpeg" "$BIN_DIR/ffmpeg"
-curl --fail --location "https://evermeet.cx/ffmpeg/getrelease/ffplay/zip" --output "$tmp_dir/ffplay.zip"
-unzip -q "$tmp_dir/ffplay.zip" -d "$tmp_dir/ffplay"
-cp "$tmp_dir/ffplay/ffplay" "$BIN_DIR/ffplay"
+if [[ "$ARCH" == "arm64" ]] &&
+  command -v ffmpeg >/dev/null &&
+  command -v ffplay >/dev/null &&
+  file "$(command -v ffmpeg)" "$(command -v ffplay)" | grep -q "arm64"; then
+  echo "Using native ffmpeg and ffplay from PATH..."
+  cp "$(command -v ffmpeg)" "$BIN_DIR/ffmpeg"
+  cp "$(command -v ffplay)" "$BIN_DIR/ffplay"
+else
+  echo "Downloading ffmpeg and ffplay for $ARCH..."
+  curl --fail --location "$FFMPEG_URL" --output "$tmp_dir/ffmpeg.zip"
+  unzip -q "$tmp_dir/ffmpeg.zip" -d "$tmp_dir/ffmpeg"
+  cp "$tmp_dir/ffmpeg/ffmpeg" "$BIN_DIR/ffmpeg"
+  curl --fail --location "https://evermeet.cx/ffmpeg/getrelease/ffplay/zip" --output "$tmp_dir/ffplay.zip"
+  unzip -q "$tmp_dir/ffplay.zip" -d "$tmp_dir/ffplay"
+  cp "$tmp_dir/ffplay/ffplay" "$BIN_DIR/ffplay"
+fi
 
 if [[ "$ARCH" == "arm64" ]] && ! file "$BIN_DIR/ffmpeg" "$BIN_DIR/ffplay" | grep -q "arm64"; then
   echo "Downloaded ffmpeg/ffplay are not arm64 binaries. Refusing to create an Apple Silicon package." >&2
@@ -71,9 +80,9 @@ chmod 755 "$CONTENTS_DIR/MacOS/pj-player-launcher"
 
 rm -rf "$BUILD_DIR/command"
 mkdir -p "$BUILD_DIR/command"
-cp "$CONTENTS_DIR/MacOS/pjplayer" "$BUILD_DIR/command/pj-player"
+cp "$CONTENTS_DIR/MacOS/pjplayer" "$BUILD_DIR/command/pjplayer"
 cp -R "$BIN_DIR" "$BUILD_DIR/command/bin"
-chmod 755 "$BUILD_DIR/command/pj-player"
+chmod 755 "$BUILD_DIR/command/pjplayer"
 
 cat <<EOF
 
@@ -85,7 +94,7 @@ Open the app with:
   open "$APP_DIR"
 
 Run from a terminal with:
-  "$BUILD_DIR/command/pj-player"
+  "$BUILD_DIR/command/pjplayer"
 
 For distribution, sign and notarize the app, then package it in a DMG or zip.
 EOF

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-PKG_PATH="${1:-$ROOT_DIR/target/macos-package/PJ-Player.pkg}"
+PKG_PATH="${1:-$ROOT_DIR/target/macos-package/pjplayer.pkg}"
 NOTARY_PROFILE="${PJ_PLAYER_NOTARY_PROFILE:-}"
 
 if [[ -z "$NOTARY_PROFILE" ]]; then
