@@ -1,15 +1,14 @@
 use crate::error::AppError;
-use std::io::{Read, Write};
-use std::process::{Child, Command, Stdio};
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc, Mutex,
-};
-use std::thread::{self, JoinHandle};
+use crate::offlinePlayer::{ load_audio_files, load_entries };
+use std::io::{ Read, Write };
+use std::path::PathBuf;
+use std::process::{ Child, Command, Stdio };
+use std::sync::{ atomic::{ AtomicBool, Ordering }, Arc, Mutex };
+use std::thread::{ self, JoinHandle };
 use std::time::Instant;
 
-use crate::search::{search_archive, search_youtube};
-use crate::visualizer::{Visualizer, VISUALIZATION_BAR_COUNT};
+use crate::search::{ search_archive, search_youtube };
+use crate::visualizer::{ Visualizer, VISUALIZATION_BAR_COUNT };
 
 const FFMPEG_PATH: &str = "ffmpeg";
 const FFPLAY_PATH: &str = "ffplay";
@@ -28,14 +27,19 @@ pub enum Source {
 pub enum Mode {
     Stream,
     Download,
+    OfflinePlayer,
+    AboutApp,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum View {
+    ModeSelection,
     SearchInput,
     SearchResults,
-    InitialSelection,
     SourceSelection,
+    FolderInput,
+    OfflineFiles,
+    About,
     Streaming,
     Downloading,
 }
@@ -77,7 +81,7 @@ impl StreamProcess {
     pub fn start(
         direct_url: String,
         position: f64,
-        visualization_data: Arc<Mutex<Vec<u8>>>,
+        visualization_data: Arc<Mutex<Vec<u8>>>
     ) -> Result<Self, AppError> {
         reset_visualization(&visualization_data);
 
@@ -87,7 +91,7 @@ impl StreamProcess {
             &direct_url,
             position,
             Arc::clone(&visualization_data),
-            Arc::clone(&visualizer_running),
+            Arc::clone(&visualizer_running)
         )?;
 
         Ok(Self {
@@ -104,7 +108,7 @@ impl StreamProcess {
         direct_url: &str,
         position: f64,
         visualization_data: Arc<Mutex<Vec<u8>>>,
-        visualizer_running: Arc<AtomicBool>,
+        visualizer_running: Arc<AtomicBool>
     ) -> Result<(Child, Child, JoinHandle<()>), AppError> {
         let position = position.to_string();
 
@@ -130,25 +134,26 @@ impl StreamProcess {
             .stderr(Stdio::null())
             .spawn()?;
 
-        let mut ffplay = match Command::new(FFPLAY_PATH)
-            .args([
-                "-nodisp",
-                "-autoexit",
-                "-loglevel",
-                "warning",
-                "-f",
-                AUDIO_FORMAT,
-                "-ar",
-                AUDIO_SAMPLE_RATE,
-                "-ch_layout",
-                "stereo",
-                "-i",
-                "pipe:0",
-            ])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
+        let mut ffplay = match
+            Command::new(FFPLAY_PATH)
+                .args([
+                    "-nodisp",
+                    "-autoexit",
+                    "-loglevel",
+                    "warning",
+                    "-f",
+                    AUDIO_FORMAT,
+                    "-ar",
+                    AUDIO_SAMPLE_RATE,
+                    "-ch_layout",
+                    "stereo",
+                    "-i",
+                    "pipe:0",
+                ])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
         {
             Ok(process) => process,
             Err(error) => {
@@ -159,13 +164,11 @@ impl StreamProcess {
             }
         };
 
-        let mut ffmpeg_stdout = ffmpeg
-            .stdout
+        let mut ffmpeg_stdout = ffmpeg.stdout
             .take()
             .ok_or_else(|| AppError::Message("Failed to access ffmpeg stdout".to_string()))?;
 
-        let mut ffplay_stdin = ffplay
-            .stdin
+        let mut ffplay_stdin = ffplay.stdin
             .take()
             .ok_or_else(|| AppError::Message("Failed to access ffplay stdin".to_string()))?;
 
@@ -253,12 +256,14 @@ impl StreamProcess {
 
         self.visualizer_running.store(true, Ordering::Relaxed);
 
-        let (ffmpeg, ffplay, audio_thread) = match Self::spawn_pipeline(
-            &self.direct_url,
-            position,
-            Arc::clone(&self.visualization_data),
-            Arc::clone(&self.visualizer_running),
-        ) {
+        let (ffmpeg, ffplay, audio_thread) = match
+            Self::spawn_pipeline(
+                &self.direct_url,
+                position,
+                Arc::clone(&self.visualization_data),
+                Arc::clone(&self.visualizer_running)
+            )
+        {
             Ok(result) => result,
             Err(error) => {
                 self.visualizer_running.store(false, Ordering::Relaxed);
@@ -276,9 +281,7 @@ impl StreamProcess {
 }
 
 fn pause_process(pid: u32) -> Result<(), AppError> {
-    let status = Command::new("kill")
-        .args(["-s", "STOP", &pid.to_string()])
-        .status()?;
+    let status = Command::new("kill").args(["-s", "STOP", &pid.to_string()]).status()?;
 
     if status.success() {
         Ok(())
@@ -292,9 +295,7 @@ fn pause_process(pid: u32) -> Result<(), AppError> {
 }
 
 fn resume_process(pid: u32) -> Result<(), AppError> {
-    let status = Command::new("kill")
-        .args(["-s", "CONT", &pid.to_string()])
-        .status()?;
+    let status = Command::new("kill").args(["-s", "CONT", &pid.to_string()]).status()?;
 
     if status.success() {
         Ok(())
@@ -319,9 +320,17 @@ fn reset_visualization(visualization_data: &Arc<Mutex<Vec<u8>>>) {
 
 pub struct AppUi {
     pub search_input: String,
+    pub folder_input: String,
+    pub offline_files: Vec<PathBuf>,
+    pub offline_entries: Vec<PathBuf>,
+    pub offline_search_input: String,
+    pub offline_searching: bool,
+    pub offline_root: PathBuf,
     pub search_results: Vec<SearchResult>,
     pub selected_result_index: Option<usize>,
     pub selected_source_index: usize,
+    pub selected_offline_index: Option<usize>,
+    pub selected_offline_entry: Option<usize>,
     pub source: Source,
     pub current_view: View,
 
@@ -329,6 +338,8 @@ pub struct AppUi {
     pub stream_process: Option<StreamProcess>,
 
     pub mode: Option<Mode>,
+    pub offline_autoplay: bool,
+    pub notice: Option<String>,
 
     pub current_equalizer: usize,
     pub download_status: Arc<Mutex<Option<String>>>,
@@ -345,17 +356,27 @@ impl AppUi {
     pub fn new() -> Self {
         AppUi {
             search_input: String::new(),
+            folder_input: String::from("."),
+            offline_files: Vec::new(),
+            offline_entries: Vec::new(),
+            offline_search_input: String::new(),
+            offline_searching: false,
+            offline_root: PathBuf::from("."),
             search_results: Vec::new(),
             selected_result_index: Some(0),
             selected_source_index: 0,
+            selected_offline_index: None,
+            selected_offline_entry: None,
             source: Source::YouTube,
-            current_view: View::SearchInput,
+            current_view: View::ModeSelection,
 
             visualization_data: Arc::new(Mutex::new(vec![0; VISUALIZATION_BAR_COUNT])),
             stream_process: None,
 
             current_equalizer: 0,
             mode: None,
+            offline_autoplay: false,
+            notice: None,
 
             download_status: Arc::new(Mutex::new(None)),
 
@@ -376,11 +397,27 @@ impl AppUi {
 
         self.current_view = View::SearchResults;
 
-        self.selected_result_index = if self.search_results.is_empty() {
-            None
-        } else {
-            Some(0)
-        };
+        self.selected_result_index = if self.search_results.is_empty() { None } else { Some(0) };
+
+        Ok(())
+    }
+
+    pub fn load_offline_folder(&mut self) -> Result<(), AppError> {
+        let folder = PathBuf::from(self.folder_input.trim());
+        self.offline_root = folder.clone();
+        self.load_offline_directory(&folder)?;
+        self.current_view = View::OfflineFiles;
+        self.notice = None;
+
+        Ok(())
+    }
+
+    pub fn load_offline_directory(&mut self, folder: &PathBuf) -> Result<(), AppError> {
+        self.folder_input = folder.to_string_lossy().into_owned();
+        self.offline_files = load_audio_files(folder)?;
+        self.offline_entries = load_entries(folder, &self.offline_search_input)?;
+        self.selected_offline_entry = self.offline_entries.first().map(|_| 0);
+        self.selected_offline_index = self.offline_files.first().map(|_| 0);
 
         Ok(())
     }
@@ -419,7 +456,20 @@ impl AppUi {
 
         if finished {
             self.stop_streaming();
-            self.current_view = View::SearchResults;
+            if self.mode == Some(Mode::OfflinePlayer) {
+                let next_index = self.selected_offline_index.and_then(|index|
+                    (index + 1 < self.offline_files.len()).then_some(index + 1)
+                );
+                self.selected_offline_index = next_index;
+                self.selected_offline_entry = self.selected_offline_index.and_then(|index| {
+                    self.offline_entries
+                        .iter()
+                        .position(|entry| entry == &self.offline_files[index])
+                });
+                self.current_view = View::OfflineFiles;
+            } else {
+                self.current_view = View::SearchResults;
+            }
         }
 
         Ok(())

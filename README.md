@@ -1,6 +1,6 @@
 # PJ-Player
 
-PJ-Player is a Rust-based terminal application (TUI) that allows users to search, DOWNLOAD or STREAM audio tracks directly from the terminal. It supports downloading and streaming from YouTube and Internet Archive.
+PJ-Player is a Rust-based terminal application (TUI) that allows users to stream, download, and play local audio directly from the terminal.
 
 # DEMO
 
@@ -11,6 +11,8 @@ PJ-Player is a Rust-based terminal application (TUI) that allows users to search
 - **Search for audio** on YouTube or Internet Archive.
 - **Stream audio** on YouTube.
 - **Download audio** from YouTube or Internet Archive.
+- **Offline Player** mode for selecting a folder and playing its audio files in order.
+- **About** screen with project and repository information.
 
 ## Requirements
 
@@ -64,10 +66,10 @@ To use [`PJ-Player`]
    pjplayer
    ```
 
-2. **Select DONLOAD / STREAM**:
+2. **Select a mode**:
    ![Project Demo](/demos/1-select-mode.jpeg)
 
-3. **Search For Your Favorite Song/Podcast**:
+3. **For Stream or Download, search for music**:
 
    ![Project Demo](/demos/2-search.jpeg)
 
@@ -80,6 +82,8 @@ To use [`PJ-Player`]
    ![Project Demo](/demos/4-stream.jpeg)
 - Download
    ![Project Demo](/demos/5-dl.jpeg)
+
+For Offline Player, choose **Offline Player** from the startup menu, enter a folder path, and select a track. Supported files are `mp3`, `m4a`, `wav`, `flac`, `ogg`, `aac`, and `opus`; playback advances through the folder automatically.
 
 ## Contributing
 

@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 
@@ -81,6 +82,37 @@ pub fn stream_audio(
     }
 
     let stream_process = StreamProcess::start(direct_url, 0.0, visualization_data)?;
+
+    Ok((stream_process, StreamInfo { duration }))
+}
+
+pub fn stream_local_audio(
+    path: &Path,
+    visualization_data: Arc<Mutex<Vec<u8>>>,
+) -> Result<(StreamProcess, StreamInfo), AppError> {
+    let duration_output = Command::new("ffprobe")
+        .args([
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+        ])
+        .arg(path)
+        .output()?;
+
+    let duration = if duration_output.status.success() {
+        String::from_utf8_lossy(&duration_output.stdout)
+            .trim()
+            .parse::<f64>()
+            .unwrap_or(0.0)
+    } else {
+        0.0
+    };
+
+    let stream_process =
+        StreamProcess::start(path.to_string_lossy().into_owned(), 0.0, visualization_data)?;
 
     Ok((stream_process, StreamInfo { duration }))
 }
