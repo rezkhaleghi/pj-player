@@ -1,7 +1,11 @@
-use ratatui::{ layout::{ Constraint, Direction, Layout }, prelude::*, widgets::* };
+use ratatui::{
+    layout::{Constraint, Direction, Layout},
+    prelude::*,
+    widgets::*,
+};
 
 use crate::aboutApp;
-use crate::app::{ AppUi, View };
+use crate::app::{AppUi, View};
 
 pub fn render(app: &AppUi, frame: &mut Frame) {
     let chunks = Layout::default()
@@ -9,7 +13,7 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
         .constraints([
             Constraint::Length(5), // Header
             Constraint::Length(1), // Second header
-            Constraint::Min(10), // Main content
+            Constraint::Min(10),   // Main content
         ])
         .split(frame.area());
 
@@ -23,10 +27,10 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
 ▐▌ ▐▌▐▌    ▐▌ ▐▌▐▌   ▐▌ ▐▌▝▚▞▘ ▐▌   ▐▌ ▐▌
 ▐▛▀▘ ▐▌    ▐▛▀▘ ▐▌   ▐▛▀▜▌ ▐▌  ▐▛▀▀▘▐▛▀▚▖
 ▐▌▗▄▄▞▘    ▐▌   ▐▙▄▄▖▐▌ ▐▌ ▐▌  ▐▙▄▄▖▐▌ ▐▌
-"#
+"#,
     )
-        .style(light_green_style)
-        .alignment(Alignment::Center);
+    .style(light_green_style)
+    .alignment(Alignment::Center);
 
     frame.render_widget(header_paragraph, chunks[0]);
 
@@ -62,9 +66,9 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
                     Block::default()
                         .borders(Borders::ALL)
                         .title("Choose a Mode")
-                        .style(light_green_style)
+                        .style(light_green_style),
                 ),
-                chunks[2]
+                chunks[2],
             );
         }
 
@@ -74,12 +78,15 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
                 .title("Search Music")
                 .style(light_green_style);
 
-            let input_text = app.notice
+            let input_text = app
+                .notice
                 .as_deref()
                 .map(|notice| format!("(Search Query): {}\n{}", app.search_input, notice))
                 .unwrap_or_else(|| format!("(Search Query): {}", app.search_input));
 
-            let input = Paragraph::new(input_text).style(white_style).block(input_block);
+            let input = Paragraph::new(input_text)
+                .style(white_style)
+                .block(input_block);
 
             let search_chunks = Layout::default()
                 .direction(Direction::Vertical)
@@ -110,7 +117,7 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
                 Block::default()
                     .borders(Borders::ALL)
                     .title("Select Source")
-                    .style(light_green_style)
+                    .style(light_green_style),
             );
 
             frame.render_widget(list, chunks[2]);
@@ -121,13 +128,16 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
                 .borders(Borders::ALL)
                 .title("Offline Player - Folder")
                 .style(light_green_style);
-            let folder_text = app.notice
+            let folder_text = app
+                .notice
                 .as_deref()
                 .map(|notice| format!("Folder: {}\n{}", app.folder_input, notice))
                 .unwrap_or_else(|| format!("Folder: {}", app.folder_input));
             frame.render_widget(
-                Paragraph::new(folder_text).style(white_style).block(folder_block),
-                chunks[2]
+                Paragraph::new(folder_text)
+                    .style(white_style)
+                    .block(folder_block),
+                chunks[2],
             );
         }
 
@@ -151,13 +161,12 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
                             white_style
                         };
                         let marker = if path.is_dir() { "[DIR] " } else { "      " };
-                        ListItem::new(
-                            format!(
-                                "{}{}",
-                                marker,
-                                path.file_name().unwrap_or_default().to_string_lossy()
-                            )
-                        ).style(style)
+                        ListItem::new(format!(
+                            "{}{}",
+                            marker,
+                            path.file_name().unwrap_or_default().to_string_lossy()
+                        ))
+                        .style(style)
                     })
                     .collect()
             };
@@ -166,21 +175,19 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
                 List::new(items).block(
                     Block::default()
                         .borders(Borders::ALL)
-                        .title(
-                            if app.offline_searching {
-                                format!("Offline Search: {}", app.offline_search_input)
-                            } else {
-                                format!(
-                                    "Offline Player: {} ({}/{})",
-                                    app.folder_input,
-                                    app.selected_offline_entry.unwrap_or(0) + 1,
-                                    app.offline_entries.len()
-                                )
-                            }
-                        )
-                        .style(light_green_style)
+                        .title(if app.offline_searching {
+                            format!("Offline Search: {}", app.offline_search_input)
+                        } else {
+                            format!(
+                                "Offline Player: {} ({}/{})",
+                                app.folder_input,
+                                app.selected_offline_entry.unwrap_or(0) + 1,
+                                app.offline_entries.len()
+                            )
+                        })
+                        .style(light_green_style),
                 ),
-                chunks[2]
+                chunks[2],
             );
         }
 
@@ -192,10 +199,10 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
                         Block::default()
                             .borders(Borders::ALL)
                             .title("About PJ-Player")
-                            .style(light_green_style)
+                            .style(light_green_style),
                     )
                     .wrap(Wrap { trim: false }),
-                chunks[2]
+                chunks[2],
             );
         }
 
@@ -213,7 +220,7 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
                     Block::default()
                         .borders(Borders::ALL)
                         .title("Search Results")
-                        .style(light_green_style)
+                        .style(light_green_style),
                 );
 
                 frame.render_widget(no_results_list, chunks[2]);
@@ -234,13 +241,11 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
                             white_style
                         };
 
-                        let content = Line::from(
-                            vec![
-                                Span::raw(format!("{}: ", i + 1)),
-                                Span::raw(&result.title),
-                                Span::raw(format!(" ({:?})", result.source))
-                            ]
-                        );
+                        let content = Line::from(vec![
+                            Span::raw(format!("{}: ", i + 1)),
+                            Span::raw(&result.title),
+                            Span::raw(format!(" ({:?})", result.source)),
+                        ]);
 
                         ListItem::new(content).style(style)
                     })
@@ -250,7 +255,7 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
                     Block::default()
                         .borders(Borders::ALL)
                         .title("Search Results")
-                        .style(light_green_style)
+                        .style(light_green_style),
                 );
 
                 frame.render_widget(list, chunks[2]);
@@ -262,7 +267,7 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
                 .direction(Direction::Vertical)
                 .constraints([
                     Constraint::Length(5), // Song information
-                    Constraint::Min(8), // Equalizer
+                    Constraint::Min(8),    // Equalizer
                     Constraint::Length(7), // Controls
                 ])
                 .split(chunks[2]);
@@ -273,7 +278,11 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
 
             let song_block = Block::default()
                 .borders(Borders::ALL)
-                .title(if app.paused { "Now Paused" } else { "Now Streaming" })
+                .title(if app.paused {
+                    "Now Paused"
+                } else {
+                    "Now Streaming"
+                })
                 .style(light_green_style);
 
             let song_name = if app.mode == Some(crate::app::Mode::OfflinePlayer) {
@@ -294,17 +303,13 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
             let current_time = format_time(app.position);
             let total_time = format_time(app.duration);
 
-            let song_info = Text::from(
-                vec![
-                    Line::from(Span::styled(song_name, white_style)),
-                    Line::from(
-                        Span::styled(
-                            format!("{} / {}", current_time, total_time),
-                            light_green_style
-                        )
-                    )
-                ]
-            );
+            let song_info = Text::from(vec![
+                Line::from(Span::styled(song_name, white_style)),
+                Line::from(Span::styled(
+                    format!("{} / {}", current_time, total_time),
+                    light_green_style,
+                )),
+            ]);
 
             let song_paragraph = Paragraph::new(song_info)
                 .block(song_block)
@@ -354,10 +359,8 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
                 let (chars, style) = &eq_styles[app.current_equalizer];
 
                 for (i, &value) in eq_data.iter().enumerate() {
-                    let bar_height = (
-                        ((value as f64) / 10.0) *
-                        (max_height as f64)
-                    ).round() as usize;
+                    let bar_height =
+                        (((value as f64) / 10.0) * (max_height as f64)).round() as usize;
 
                     let x = inner_area.x + ((i * bar_width) as u16);
 
@@ -404,22 +407,18 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
                 "Playing - Press SPACE to pause"
             };
 
-            let help_text = Text::from(
-                vec![
-                    Line::from(Span::raw(status_text)),
-                    Line::from(Span::raw("← / →  Seek 15 seconds")),
-                    Line::from(
-                        Span::raw(
-                            if app.mode == Some(crate::app::Mode::OfflinePlayer) {
-                                "↑ / ↓  Next / previous song"
-                            } else {
-                                ""
-                            }
-                        )
-                    ),
-                    Line::from(Span::raw("1-6 Equalizer style   |   ESC Back to search"))
-                ]
-            );
+            let help_text = Text::from(vec![
+                Line::from(Span::raw(status_text)),
+                Line::from(Span::raw("← / →  Seek 15 seconds")),
+                Line::from(Span::raw(
+                    if app.mode == Some(crate::app::Mode::OfflinePlayer) {
+                        "↑ / ↓  Next / previous song"
+                    } else {
+                        ""
+                    },
+                )),
+                Line::from(Span::raw("1-6 Equalizer style   |   ESC Back to search")),
+            ]);
 
             let help_paragraph = Paragraph::new(help_text)
                 .style(dim_style)
@@ -432,7 +431,9 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
         View::Downloading => {
             let download_status = app.download_status.lock().unwrap();
 
-            let status_message = download_status.as_deref().unwrap_or("No downloads in progress");
+            let status_message = download_status
+                .as_deref()
+                .unwrap_or("No downloads in progress");
 
             let download_block = Block::default()
                 .borders(Borders::ALL)

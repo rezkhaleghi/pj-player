@@ -1,8 +1,8 @@
 use std::path::Path;
 use std::process::Command;
-use std::sync::{Arc, Mutex};
+use std::sync::{ Arc, Mutex };
 
-use crate::app::StreamProcess;
+use crate::app::{ bundled_command, StreamProcess };
 use crate::error::AppError;
 
 const YT_DLP_PATH: &str = "yt-dlp";
@@ -25,17 +25,12 @@ pub struct StreamInfo {
 ///                              └→ Rust visualization
 pub fn stream_audio(
     video_id: &str,
-    visualization_data: Arc<Mutex<Vec<u8>>>,
+    visualization_data: Arc<Mutex<Vec<u8>>>
 ) -> Result<(StreamProcess, StreamInfo), AppError> {
     let youtube_url = format!("https://www.youtube.com/watch?v={}", video_id);
 
-    let metadata_output = Command::new(YT_DLP_PATH)
-        .args([
-            "--skip-download",
-            "--print",
-            "%(title)s\n%(duration)s",
-            &youtube_url,
-        ])
+    let metadata_output = bundled_command(YT_DLP_PATH)
+        .args(["--skip-download", "--print", "%(title)s\n%(duration)s", &youtube_url])
         .output()?;
 
     if !metadata_output.status.success() {
@@ -56,7 +51,7 @@ pub fn stream_audio(
 
     let duration = duration_text.parse::<f64>().unwrap_or(0.0);
 
-    let url_output = Command::new(YT_DLP_PATH)
+    let url_output = bundled_command(YT_DLP_PATH)
         .args(["-f", "bestaudio", "--get-url", &youtube_url])
         .output()?;
 
@@ -76,9 +71,7 @@ pub fn stream_audio(
         .to_string();
 
     if direct_url.is_empty() {
-        return Err(AppError::Message(
-            "yt-dlp returned an empty audio URL".to_string(),
-        ));
+        return Err(AppError::Message("yt-dlp returned an empty audio URL".to_string()));
     }
 
     let stream_process = StreamProcess::start(direct_url, 0.0, visualization_data)?;
@@ -88,7 +81,7 @@ pub fn stream_audio(
 
 pub fn stream_local_audio(
     path: &Path,
-    visualization_data: Arc<Mutex<Vec<u8>>>,
+    visualization_data: Arc<Mutex<Vec<u8>>>
 ) -> Result<(StreamProcess, StreamInfo), AppError> {
     let duration_output = Command::new("ffprobe")
         .args([
@@ -103,16 +96,16 @@ pub fn stream_local_audio(
         .output()?;
 
     let duration = if duration_output.status.success() {
-        String::from_utf8_lossy(&duration_output.stdout)
-            .trim()
-            .parse::<f64>()
-            .unwrap_or(0.0)
+        String::from_utf8_lossy(&duration_output.stdout).trim().parse::<f64>().unwrap_or(0.0)
     } else {
         0.0
     };
 
-    let stream_process =
-        StreamProcess::start(path.to_string_lossy().into_owned(), 0.0, visualization_data)?;
+    let stream_process = StreamProcess::start(
+        path.to_string_lossy().into_owned(),
+        0.0,
+        visualization_data
+    )?;
 
     Ok((stream_process, StreamInfo { duration }))
 }

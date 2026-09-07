@@ -2,6 +2,46 @@
 
 PJ-Player is a Rust-based terminal application (TUI) that allows users to stream, download, and play local audio directly from the terminal.
 
+### End-user macOS instructions
+
+Download the release corresponding to your Mac's architecture:
+
+- **Apple Silicon**: M1, M2, M3, M4, and newer Macs use the `arm64` release.
+- **Intel**: older Intel Macs use the `x86_64` release.
+
+After downloading:
+
+1. Move `PJ-Player.app` to `/Applications`.
+2. Double-click it to start PJ-Player in Terminal.
+3. If macOS blocks the unsigned app, right-click it, choose **Open**, and confirm. Alternatively, run:
+
+   ```sh
+   xattr -dr com.apple.quarantine /Applications/PJ-Player.app
+   ```
+
+To also use PJ-Player with the `pj-player` terminal command, run:
+
+```sh
+mkdir -p "$HOME/.local/bin"
+
+cat > "$HOME/.local/bin/pj-player" <<'EOF'
+#!/bin/sh
+exec /Applications/PJ-Player.app/Contents/MacOS/pjplayer "$@"
+EOF
+
+chmod +x "$HOME/.local/bin/pj-player"
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.zshrc"
+source "$HOME/.zshrc"
+```
+
+The user can then start PJ-Player from any Terminal window:
+
+```sh
+pj-player
+```
+
+The app must remain at `/Applications/PJ-Player.app` for this terminal command to work. A signed `.pkg` release sets up both the clickable app and terminal command automatically.
+
 # DEMO
 
 ![Project Demo](/demos/demo.gif)
@@ -57,6 +97,53 @@ To use [`PJ-Player`]
    ```sh
    sudo cp target/release/pjplayer /usr/local/bin/pjplayer
    ```
+
+## Self-contained macOS package
+
+End users do not need Rust, Cargo, yt-dlp, ffmpeg, or ffplay when using a packaged release. The release bundle contains the compiled app and standalone runtime tools.
+
+These two commands are for the **release builder**, because the first command compiles Rust and downloads the runtime tools:
+
+```sh
+./bin/package-macos.sh
+```
+
+This creates `target/macos-package/PJ-Player.app` and a terminal distribution under `target/macos-package/command`. To install both the clickable app and the `pj-player` terminal command for the current user:
+
+```sh
+./bin/install-macos-bundle.sh
+```
+
+For end users, distribute the generated `PJ-Player.app` in a signed zip or DMG. They download it, move it to Applications, and double-click it. To provide the terminal command too, distribute the generated `command` directory with an installer package; the end user should not need to run `package-macos.sh`.
+
+For public distribution, sign and notarize the app with an Apple Developer certificate. Build separate arm64 and x86_64 releases, or provide a universal build, because ffmpeg and ffplay must match the user's Mac architecture.
+
+The current `evermeet.cx` download used by the packaging script provides Intel ffmpeg/ffplay binaries. The script therefore refuses to create an arm64 package until arm64 or universal ffmpeg/ffplay binaries are supplied. This avoids giving Apple Silicon users a package that unexpectedly requires Rosetta.
+
+### One-click installer package
+
+To create a `.pkg` that installs both the clickable app and the `pj-player` terminal command:
+
+```sh
+./bin/package-macos-pkg.sh
+```
+
+Without signing identities this creates an unsigned package for local testing. For a public release, first set your Developer ID identities:
+
+```sh
+export PJ_PLAYER_APP_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)"
+export PJ_PLAYER_INSTALLER_SIGN_IDENTITY="3rd Party Mac Developer Installer: Your Name (TEAMID)"
+./bin/package-macos-pkg.sh
+```
+
+The package installs `PJ-Player.app` into `/Applications` and `pj-player` into `/usr/local/bin`. Configure an app-specific `notarytool` profile, then notarize it with:
+
+```sh
+export PJ_PLAYER_NOTARY_PROFILE="pj-player-notary"
+./bin/notarize-macos-pkg.sh target/macos-package/PJ-Player.pkg
+```
+
+Users download the notarized `PJ-Player.pkg`, double-click it, and can then either open PJ-Player from Applications or run `pj-player` in Terminal. The installer asks for an administrator password because it writes to `/Applications` and `/usr/local`.
 
 ## Usage
 

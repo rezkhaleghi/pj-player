@@ -13,6 +13,26 @@ use crate::visualizer::{ Visualizer, VISUALIZATION_BAR_COUNT };
 const FFMPEG_PATH: &str = "ffmpeg";
 const FFPLAY_PATH: &str = "ffplay";
 
+pub fn bundled_command(name: &str) -> Command {
+    if let Ok(executable) = std::env::current_exe() {
+        let candidates = [
+            executable.parent().map(|path| path.join("bin").join(name)),
+            executable
+                .parent()
+                .and_then(|path| path.parent())
+                .map(|path| path.join("Resources").join("bin").join(name)),
+        ];
+
+        for bundled_path in candidates.into_iter().flatten() {
+            if bundled_path.is_file() {
+                return Command::new(bundled_path);
+            }
+        }
+    }
+
+    Command::new(name)
+}
+
 const AUDIO_SAMPLE_RATE: &str = "44100";
 const AUDIO_CHANNELS: &str = "2";
 const AUDIO_FORMAT: &str = "s16le";
@@ -112,7 +132,7 @@ impl StreamProcess {
     ) -> Result<(Child, Child, JoinHandle<()>), AppError> {
         let position = position.to_string();
 
-        let mut ffmpeg = Command::new(FFMPEG_PATH)
+        let mut ffmpeg = bundled_command(FFMPEG_PATH)
             .args([
                 "-hide_banner",
                 "-loglevel",
@@ -135,7 +155,7 @@ impl StreamProcess {
             .spawn()?;
 
         let mut ffplay = match
-            Command::new(FFPLAY_PATH)
+            bundled_command(FFPLAY_PATH)
                 .args([
                     "-nodisp",
                     "-autoexit",

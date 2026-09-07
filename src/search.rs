@@ -1,5 +1,4 @@
-use std::process::Command;
-
+use crate::app::bundled_command;
 use reqwest::Client;
 use serde_json::Value;
 
@@ -9,7 +8,7 @@ use crate::error::AppError;
 const YT_DLP_PATH: &str = "yt-dlp";
 
 pub async fn search_youtube(query: &str) -> Result<Vec<SearchResult>, AppError> {
-    let output = Command::new(YT_DLP_PATH)
+    let output = bundled_command(YT_DLP_PATH)
         .arg("--default-search")
         .arg("ytsearch")
         .arg(format!("ytsearch25:{}", query))
