@@ -39,7 +39,7 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
     match app.current_view {
         View::ModeSelection => {
             let modes = [
-                "1. STREAM FROM YOUTUBE",
+                "1. STREAM MUSIC",
                 "2. DOWNLOAD MUSIC",
                 "3. OFFLINE PLAYER",
                 "4. ABOUT PJ-PLAYER",
