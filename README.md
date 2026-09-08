@@ -127,6 +127,8 @@ For end users, distribute the generated `pjplayer.app` in a signed zip or DMG. T
 
 For public distribution, sign and notarize the app with an Apple Developer certificate. Build separate arm64 and x86_64 releases, or provide a universal build, because ffmpeg and ffplay must match the user's Mac architecture.
 
+The `ARCHITECTURE` file in `bin/` and in `target/macos-package/` identifies the binaries in that directory as `arm64` or `intel`. The macOS packaging script creates or refreshes the package marker automatically.
+
 The current `evermeet.cx` download used by the packaging script provides Intel ffmpeg/ffplay binaries. The script therefore refuses to create an arm64 package until arm64 or universal ffmpeg/ffplay binaries are supplied. This avoids giving Apple Silicon users a package that unexpectedly requires Rosetta.
 
 ### One-click installer package

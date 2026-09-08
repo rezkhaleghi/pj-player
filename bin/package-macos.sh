@@ -11,8 +11,8 @@ BIN_DIR="$RESOURCES_DIR/bin"
 ARCH="$(uname -m)"
 
 case "$ARCH" in
-  arm64) FFMPEG_URL="https://evermeet.cx/ffmpeg/getrelease/zip" ;;
-  x86_64) FFMPEG_URL="https://evermeet.cx/ffmpeg/getrelease/zip" ;;
+  arm64) ARCH_LABEL="arm64"; FFMPEG_URL="https://evermeet.cx/ffmpeg/getrelease/zip" ;;
+  x86_64) ARCH_LABEL="intel"; FFMPEG_URL="https://evermeet.cx/ffmpeg/getrelease/zip" ;;
   *) echo "Unsupported macOS architecture: $ARCH" >&2; exit 1 ;;
 esac
 
@@ -20,6 +20,8 @@ YT_DLP_URL="https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_mac
 
 rm -rf "$APP_DIR"
 mkdir -p "$CONTENTS_DIR/MacOS" "$BIN_DIR"
+printf '%s\n' "$ARCH_LABEL" > "$BUILD_DIR/ARCHITECTURE"
+printf '%s\n' "$ARCH_LABEL" > "$BIN_DIR/ARCHITECTURE"
 
 echo "Building PJ-Player for $ARCH..."
 cargo build --release --manifest-path "$ROOT_DIR/Cargo.toml"
