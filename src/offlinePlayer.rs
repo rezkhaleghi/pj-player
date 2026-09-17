@@ -1,4 +1,5 @@
 use std::path::{ Path, PathBuf };
+use std::sync::atomic::{ AtomicBool, Ordering };
 
 use crate::error::AppError;
 
@@ -30,13 +31,21 @@ pub fn load_audio_files(folder: &Path) -> Result<Vec<PathBuf>, AppError> {
 }
 
 pub fn load_entries(folder: &Path, query: &str) -> Result<Vec<PathBuf>, AppError> {
+    load_entries_with_cancel(folder, query, None)
+}
+
+pub fn load_entries_with_cancel(
+    folder: &Path,
+    query: &str,
+    cancel: Option<&AtomicBool>
+) -> Result<Vec<PathBuf>, AppError> {
     if !folder.is_dir() {
         return Err(AppError::Message(format!("Not a folder: {}", folder.display())));
     }
 
     let query = query.to_lowercase();
     if !query.is_empty() {
-        return load_matching_audio_files(folder, &query);
+        return load_matching_audio_files(folder, &query, cancel);
     }
 
     let mut entries: Vec<PathBuf> = std::fs
@@ -60,7 +69,11 @@ pub fn load_entries(folder: &Path, query: &str) -> Result<Vec<PathBuf>, AppError
     Ok(entries)
 }
 
-fn load_matching_audio_files(folder: &Path, query: &str) -> Result<Vec<PathBuf>, AppError> {
+fn load_matching_audio_files(
+    folder: &Path,
+    query: &str,
+    cancel: Option<&AtomicBool>
+) -> Result<Vec<PathBuf>, AppError> {
     let mut entries = Vec::new();
 
     let Ok(read_dir) = std::fs::read_dir(folder) else {
@@ -68,14 +81,25 @@ fn load_matching_audio_files(folder: &Path, query: &str) -> Result<Vec<PathBuf>,
     };
 
     for entry in read_dir.filter_map(Result::ok) {
+        if cancel.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+            return Ok(entries);
+        }
+
         let path = entry.path();
-        if is_hidden(&path) || entry.file_type().map(|kind| kind.is_symlink()).unwrap_or(true) {
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if is_hidden(&path) || file_type.is_symlink() {
             continue;
         }
 
-        if path.is_dir() {
-            entries.extend(load_matching_audio_files(&path, query)?);
-        } else if is_audio_file(&path) && path.to_string_lossy().to_lowercase().contains(query) {
+        if file_type.is_dir() {
+            entries.extend(load_matching_audio_files(&path, query, cancel)?);
+        } else if
+            file_type.is_file() &&
+            is_audio_file(&path) &&
+            path.to_string_lossy().to_lowercase().contains(query)
+        {
             entries.push(path);
         }
     }

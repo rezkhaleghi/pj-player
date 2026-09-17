@@ -138,7 +138,9 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
                 .direction(Direction::Vertical)
                 .constraints([Constraint::Length(3), Constraint::Min(1)])
                 .split(chunks[2]);
-            let search_text = if app.offline_search_input.is_empty() {
+            let search_text = if app.offline_search_task.is_some() {
+                format!("Searching: {}\nPress Esc or Ctrl+C to cancel", app.offline_search_input)
+            } else if app.offline_search_input.is_empty() {
                 "Search by name or anything...".to_string()
             } else {
                 format!("Search: {}", app.offline_search_input)
@@ -262,11 +264,10 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
                             vec![
                                 Span::raw(format!("{}: ", i + 1)),
                                 Span::raw(
-                                    result
-                                        .title
+                                    result.title
                                         .chars()
                                         .take(chunks[2].width.saturating_sub(20) as usize)
-                                        .collect::<String>(),
+                                        .collect::<String>()
                                 ),
                                 Span::raw(format!(" ({:?})", result.source))
                             ]

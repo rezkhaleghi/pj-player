@@ -1,5 +1,5 @@
 use crate::error::AppError;
-use crate::offlinePlayer::{ load_audio_files, load_entries };
+use crate::offlinePlayer::{ load_audio_files, load_entries, load_entries_with_cancel };
 use std::io::{ Read, Write };
 use std::path::PathBuf;
 use std::process::{ Child, Command, Stdio };
@@ -345,8 +345,8 @@ pub struct AppUi {
     pub offline_entries: Vec<PathBuf>,
     pub offline_search_input: String,
     pub offline_searching: bool,
-    pub offline_search_task:
-        Option<tokio::task::JoinHandle<Result<Vec<PathBuf>, AppError>>>,
+    pub offline_search_task: Option<tokio::task::JoinHandle<Result<Vec<PathBuf>, AppError>>>,
+    pub offline_search_cancel: Option<Arc<AtomicBool>>,
     pub offline_root: PathBuf,
     pub search_results: Vec<SearchResult>,
     pub selected_result_index: Option<usize>,
@@ -384,6 +384,7 @@ impl AppUi {
             offline_search_input: String::new(),
             offline_searching: false,
             offline_search_task: None,
+            offline_search_cancel: None,
             offline_root: PathBuf::from("."),
             search_results: Vec::new(),
             selected_result_index: Some(0),
@@ -439,6 +440,9 @@ impl AppUi {
         if let Some(task) = self.offline_search_task.take() {
             task.abort();
         }
+        if let Some(cancel) = self.offline_search_cancel.take() {
+            cancel.store(true, Ordering::Relaxed);
+        }
         self.folder_input = folder.to_string_lossy().into_owned();
         self.offline_entries = load_entries(folder, &self.offline_search_input)?;
         self.offline_files = if self.offline_search_input.is_empty() {
@@ -456,6 +460,9 @@ impl AppUi {
         if let Some(task) = self.offline_search_task.take() {
             task.abort();
         }
+        if let Some(cancel) = self.offline_search_cancel.take() {
+            cancel.store(true, Ordering::Relaxed);
+        }
 
         if self.offline_search_input.is_empty() {
             let folder = PathBuf::from(&self.folder_input);
@@ -465,9 +472,23 @@ impl AppUi {
 
         let folder = PathBuf::from(&self.folder_input);
         let query = self.offline_search_input.clone();
-        self.offline_search_task = Some(tokio::spawn(async move {
-            load_entries(&folder, &query)
-        }));
+        let cancel = Arc::new(AtomicBool::new(false));
+        let task_cancel = Arc::clone(&cancel);
+        self.offline_search_cancel = Some(cancel);
+        self.offline_search_task = Some(
+            tokio::task::spawn_blocking(move || {
+                load_entries_with_cancel(&folder, &query, Some(&task_cancel))
+            })
+        );
+    }
+
+    pub fn cancel_offline_search(&mut self) {
+        if let Some(cancel) = self.offline_search_cancel.take() {
+            cancel.store(true, Ordering::Relaxed);
+        }
+        if let Some(task) = self.offline_search_task.take() {
+            task.abort();
+        }
     }
 
     pub async fn update_offline_search(&mut self) -> Result<(), AppError> {
@@ -479,9 +500,8 @@ impl AppUi {
         }
 
         let task = self.offline_search_task.take().unwrap();
-        self.offline_entries = task
-            .await
-            .map_err(|error| AppError::Message(error.to_string()))??;
+        self.offline_search_cancel = None;
+        self.offline_entries = task.await.map_err(|error| AppError::Message(error.to_string()))??;
         self.offline_files = self.offline_entries.clone();
         self.selected_offline_entry = self.offline_entries.first().map(|_| 0);
         self.selected_offline_index = self.offline_files.first().map(|_| 0);
