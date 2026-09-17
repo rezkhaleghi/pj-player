@@ -1,6 +1,7 @@
 use crate::error::AppError;
 use crate::loading::Loading;
 use crate::offlinePlayer::{ load_audio_files, load_entries, load_entries_with_cancel };
+use crate::stream::{ stream_audio, StreamInfo };
 use std::io::{ Read, Write };
 use std::path::PathBuf;
 use std::process::{ Child, Command, Stdio };
@@ -349,6 +350,7 @@ pub struct AppUi {
     pub offline_search_task: Option<tokio::task::JoinHandle<Result<Vec<PathBuf>, AppError>>>,
     pub offline_search_cancel: Option<Arc<AtomicBool>>,
     pub search_task: Option<tokio::task::JoinHandle<Result<Vec<SearchResult>, AppError>>>,
+    pub stream_task: Option<tokio::task::JoinHandle<Result<(StreamProcess, StreamInfo), AppError>>>,
     pub loading: Option<Loading>,
     pub offline_root: PathBuf,
     pub search_results: Vec<SearchResult>,
@@ -389,6 +391,7 @@ impl AppUi {
             offline_search_task: None,
             offline_search_cancel: None,
             search_task: None,
+            stream_task: None,
             loading: None,
             offline_root: PathBuf::from("."),
             search_results: Vec::new(),
@@ -455,6 +458,44 @@ impl AppUi {
             Err(error) => {
                 self.loading = None;
                 self.notice = Some(error.to_string());
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn start_stream(&mut self, identifier: String) {
+        if let Some(task) = self.stream_task.take() {
+            task.abort();
+        }
+
+        let visualization_data = Arc::clone(&self.visualization_data);
+        self.loading = Some(Loading::new());
+        self.stream_task = Some(
+            tokio::task::spawn_blocking(move || { stream_audio(&identifier, visualization_data) })
+        );
+    }
+
+    pub async fn update_stream_task(&mut self) -> Result<(), AppError> {
+        let Some(task) = self.stream_task.as_ref() else {
+            return Ok(());
+        };
+        if !task.is_finished() {
+            return Ok(());
+        }
+
+        let task = self.stream_task.take().unwrap();
+        match task.await.map_err(|error| AppError::Message(error.to_string()))? {
+            Ok((stream_process, stream_info)) => {
+                self.stream_process = Some(stream_process);
+                self.start_playback(stream_info.duration);
+                self.current_view = View::Streaming;
+                self.loading = None;
+            }
+            Err(error) => {
+                self.loading = None;
+                self.notice = Some(error.to_string());
+                self.current_view = View::SearchResults;
             }
         }
 

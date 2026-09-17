@@ -29,7 +29,7 @@ use tokio::main;
 use app::{ AppUi, Mode, Source, View };
 use download::{ download_archive_audio, download_youtube_audio };
 use error::AppError;
-use stream::{ stream_audio, stream_local_audio };
+use stream::stream_local_audio;
 use ui::render;
 
 #[main]
@@ -63,6 +63,7 @@ async fn run_app(
 
     loop {
         app.update_stream_lifecycle()?;
+        app.update_stream_task().await?;
         app.update_search().await?;
         app.update_offline_search().await?;
         app.update_playback_position();
@@ -401,18 +402,7 @@ async fn handle_search_results(app: &mut AppUi, key: KeyEvent) -> Result<(), App
 
             match app.mode {
                 Some(Mode::Stream) => {
-                    app.current_view = View::Streaming;
-
-                    let visualization_data = Arc::clone(&app.visualization_data);
-
-                    let (stream_process, stream_info) = stream_audio(
-                        &identifier,
-                        visualization_data
-                    )?;
-
-                    app.stream_process = Some(stream_process);
-
-                    app.start_playback(stream_info.duration);
+                    app.start_stream(identifier);
                 }
 
                 Some(Mode::Download) => {
