@@ -35,6 +35,10 @@ pub fn load_entries(folder: &Path, query: &str) -> Result<Vec<PathBuf>, AppError
     }
 
     let query = query.to_lowercase();
+    if !query.is_empty() {
+        return load_matching_audio_files(folder, &query);
+    }
+
     let mut entries: Vec<PathBuf> = std::fs
         ::read_dir(folder)?
         .filter_map(Result::ok)
@@ -53,6 +57,30 @@ pub fn load_entries(folder: &Path, query: &str) -> Result<Vec<PathBuf>, AppError
     entries.sort_by_key(|path| {
         ((!path.is_dir(),), path.file_name().map(|name| name.to_os_string()))
     });
+    Ok(entries)
+}
+
+fn load_matching_audio_files(folder: &Path, query: &str) -> Result<Vec<PathBuf>, AppError> {
+    let mut entries = Vec::new();
+
+    let Ok(read_dir) = std::fs::read_dir(folder) else {
+        return Ok(entries);
+    };
+
+    for entry in read_dir.filter_map(Result::ok) {
+        let path = entry.path();
+        if is_hidden(&path) || entry.file_type().map(|kind| kind.is_symlink()).unwrap_or(true) {
+            continue;
+        }
+
+        if path.is_dir() {
+            entries.extend(load_matching_audio_files(&path, query)?);
+        } else if is_audio_file(&path) && path.to_string_lossy().to_lowercase().contains(query) {
+            entries.push(path);
+        }
+    }
+
+    entries.sort_by_key(|path| path.to_string_lossy().to_lowercase());
     Ok(entries)
 }
 

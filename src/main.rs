@@ -62,6 +62,7 @@ async fn run_app(
 
     loop {
         app.update_stream_lifecycle()?;
+        app.update_offline_search().await?;
         app.update_playback_position();
 
         if app.current_view == View::OfflineFiles
@@ -222,11 +223,11 @@ async fn handle_offline_files(app: &mut AppUi, key: KeyEvent) -> Result<(), AppE
             }
             KeyCode::Backspace => {
                 app.offline_search_input.pop();
-                app.load_offline_directory(&PathBuf::from(&app.folder_input))?;
+                app.start_offline_search();
             }
             KeyCode::Char(character) => {
                 app.offline_search_input.push(character);
-                app.load_offline_directory(&PathBuf::from(&app.folder_input))?;
+                app.start_offline_search();
             }
             _ => {}
         }

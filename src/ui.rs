@@ -1,5 +1,7 @@
 use ratatui::{ layout::{ Constraint, Direction, Layout }, prelude::*, widgets::* };
 
+use std::path::Path;
+
 use crate::aboutApp;
 use crate::app::{ AppUi, View };
 
@@ -164,7 +166,7 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
                 vec![ListItem::new("No matching folders or audio files").style(white_style)]
             } else {
                 let selected = app.selected_offline_entry.unwrap_or(0);
-                let visible_rows = chunks[2].height.saturating_sub(2).max(1) as usize;
+                let visible_rows = offline_chunks[1].height.saturating_sub(2).max(1) as usize;
                 let start = selected.saturating_sub(visible_rows - 1);
                 let end = (start + visible_rows).min(app.offline_entries.len());
 
@@ -179,13 +181,11 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
                             white_style
                         };
                         let marker = if path.is_dir() { "[DIR] " } else { "      " };
-                        ListItem::new(
-                            format!(
-                                "{}{}",
-                                marker,
-                                path.file_name().unwrap_or_default().to_string_lossy()
-                            )
-                        ).style(style)
+                        let display_name = path
+                            .strip_prefix(Path::new(&app.folder_input))
+                            .unwrap_or(path)
+                            .display();
+                        ListItem::new(format!("{}{}", marker, display_name)).style(style)
                     })
                     .collect()
             };
@@ -261,7 +261,13 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
                         let content = Line::from(
                             vec![
                                 Span::raw(format!("{}: ", i + 1)),
-                                Span::raw(&result.title),
+                                Span::raw(
+                                    result
+                                        .title
+                                        .chars()
+                                        .take(chunks[2].width.saturating_sub(20) as usize)
+                                        .collect::<String>(),
+                                ),
                                 Span::raw(format!(" ({:?})", result.source))
                             ]
                         );
