@@ -262,7 +262,7 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
 
                         let content = Line::from(
                             vec![
-                                Span::raw(format!("{}: ", i + 1)),
+                                Span::raw(format!("{}: ", actual_index + 1)),
                                 Span::raw(
                                     result.title
                                         .chars()
