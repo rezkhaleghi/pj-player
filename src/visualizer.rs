@@ -141,17 +141,3 @@ impl Default for Visualizer {
         Self::new()
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn pcm_frame(left: i16, right: i16) -> [u8; BYTES_PER_FRAME] {
-        [
-            left.to_le_bytes()[0],
-            left.to_le_bytes()[1],
-            right.to_le_bytes()[0],
-            right.to_le_bytes()[1],
-        ]
-    }
-}
