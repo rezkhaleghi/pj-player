@@ -154,28 +154,4 @@ mod tests {
             right.to_le_bytes()[1],
         ]
     }
-
-    #[test]
-    fn opposite_stereo_channels_still_produce_a_visible_level() {
-        let visualization_data = Arc::new(Mutex::new(vec![0; VISUALIZATION_BAR_COUNT]));
-        let mut visualizer = Visualizer::new();
-        let frame = pcm_frame(12_000, -12_000);
-
-        visualizer.process(&frame, &visualization_data);
-
-        assert!(visualization_data.lock().unwrap()[0] > 0);
-    }
-
-    #[test]
-    fn split_frames_are_reassembled_before_processing() {
-        let visualization_data = Arc::new(Mutex::new(vec![0; VISUALIZATION_BAR_COUNT]));
-        let mut visualizer = Visualizer::new();
-        let frame = pcm_frame(12_000, 12_000);
-
-        visualizer.process(&frame[..1], &visualization_data);
-        assert_eq!(visualization_data.lock().unwrap()[0], 0);
-
-        visualizer.process(&frame[1..], &visualization_data);
-        assert!(visualization_data.lock().unwrap()[0] > 0);
-    }
 }

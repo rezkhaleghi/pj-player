@@ -24,9 +24,7 @@ pub fn content() -> Text<'static> {
                     )
                 ]
             ),
-            // Line::from(""),
             Line::from("Listen on YouTube • Download • Offline Player (with search) • Visualizer"),
-
             Line::from(""),
             Line::from(
                 vec![
