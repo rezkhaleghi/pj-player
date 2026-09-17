@@ -7,7 +7,7 @@ use crate::error::AppError;
 
 const YT_DLP_PATH: &str = "yt-dlp";
 
-pub async fn search_youtube(query: &str) -> Result<Vec<SearchResult>, AppError> {
+pub fn search_youtube_blocking(query: &str) -> Result<Vec<SearchResult>, AppError> {
     let output = bundled_command(YT_DLP_PATH)
         .arg("--default-search")
         .arg("ytsearch")

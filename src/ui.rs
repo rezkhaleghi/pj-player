@@ -38,6 +38,11 @@ pub fn render(app: &AppUi, frame: &mut Frame) {
 
     frame.render_widget(second_header_paragraph, chunks[1]);
 
+    if let Some(loading) = &app.loading {
+        loading.render(frame, chunks[2]);
+        return;
+    }
+
     match app.current_view {
         View::ModeSelection => {
             let modes = [

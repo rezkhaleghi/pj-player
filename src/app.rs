@@ -1,4 +1,5 @@
 use crate::error::AppError;
+use crate::loading::Loading;
 use crate::offlinePlayer::{ load_audio_files, load_entries, load_entries_with_cancel };
 use std::io::{ Read, Write };
 use std::path::PathBuf;
@@ -7,7 +8,7 @@ use std::sync::{ atomic::{ AtomicBool, Ordering }, Arc, Mutex };
 use std::thread::{ self, JoinHandle };
 use std::time::Instant;
 
-use crate::search::{ search_archive, search_youtube };
+use crate::search::{ search_archive, search_youtube_blocking };
 use crate::visualizer::{ Visualizer, VISUALIZATION_BAR_COUNT };
 
 const FFMPEG_PATH: &str = "ffmpeg";
@@ -347,6 +348,8 @@ pub struct AppUi {
     pub offline_searching: bool,
     pub offline_search_task: Option<tokio::task::JoinHandle<Result<Vec<PathBuf>, AppError>>>,
     pub offline_search_cancel: Option<Arc<AtomicBool>>,
+    pub search_task: Option<tokio::task::JoinHandle<Result<Vec<SearchResult>, AppError>>>,
+    pub loading: Option<Loading>,
     pub offline_root: PathBuf,
     pub search_results: Vec<SearchResult>,
     pub selected_result_index: Option<usize>,
@@ -385,6 +388,8 @@ impl AppUi {
             offline_searching: false,
             offline_search_task: None,
             offline_search_cancel: None,
+            search_task: None,
+            loading: None,
             offline_root: PathBuf::from("."),
             search_results: Vec::new(),
             selected_result_index: Some(0),
@@ -413,15 +418,45 @@ impl AppUi {
         }
     }
 
-    pub async fn search(&mut self) -> Result<(), AppError> {
-        self.search_results = match self.source {
-            Source::YouTube => search_youtube(&self.search_input).await?,
-            Source::InternetArchive => search_archive(&self.search_input).await?,
+    pub fn start_search(&mut self) {
+        if let Some(task) = self.search_task.take() {
+            task.abort();
+        }
+
+        let query = self.search_input.clone();
+        let source = self.source.clone();
+        self.loading = Some(Loading::new("Searching"));
+        self.search_task = Some(match source {
+            Source::YouTube => tokio::task::spawn_blocking(move || search_youtube_blocking(&query)),
+            Source::InternetArchive => tokio::spawn(async move { search_archive(&query).await }),
+        });
+    }
+
+    pub async fn update_search(&mut self) -> Result<(), AppError> {
+        let Some(task) = self.search_task.as_ref() else {
+            return Ok(());
         };
+        if !task.is_finished() {
+            return Ok(());
+        }
 
-        self.current_view = View::SearchResults;
-
-        self.selected_result_index = if self.search_results.is_empty() { None } else { Some(0) };
+        let task = self.search_task.take().unwrap();
+        match task.await.map_err(|error| AppError::Message(error.to_string()))? {
+            Ok(results) => {
+                self.search_results = results;
+                self.selected_result_index = if self.search_results.is_empty() {
+                    None
+                } else {
+                    Some(0)
+                };
+                self.current_view = View::SearchResults;
+                self.loading = None;
+            }
+            Err(error) => {
+                self.loading = None;
+                self.notice = Some(error.to_string());
+            }
+        }
 
         Ok(())
     }

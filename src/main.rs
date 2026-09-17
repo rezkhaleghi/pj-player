@@ -3,6 +3,7 @@ mod aboutApp;
 mod app;
 mod download;
 mod error;
+mod loading;
 #[allow(non_snake_case)]
 mod offlinePlayer;
 mod search;
@@ -62,6 +63,7 @@ async fn run_app(
 
     loop {
         app.update_stream_lifecycle()?;
+        app.update_search().await?;
         app.update_offline_search().await?;
         app.update_playback_position();
 
@@ -173,7 +175,7 @@ async fn handle_search_input(app: &mut AppUi, key: KeyEvent) -> Result<(), AppEr
                 app.selected_source_index = 0;
                 app.current_view = View::SourceSelection;
             } else {
-                app.search().await?;
+                app.start_search();
             }
         }
 
@@ -346,7 +348,7 @@ async fn handle_source_selection(app: &mut AppUi, key: KeyEvent) -> Result<(), A
                 _ => Source::YouTube,
             };
 
-            app.search().await?;
+            app.start_search();
         }
 
         KeyCode::Left => {
