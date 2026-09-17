@@ -425,7 +425,7 @@ impl AppUi {
 
         let query = self.search_input.clone();
         let source = self.source.clone();
-        self.loading = Some(Loading::new("Searching"));
+        self.loading = Some(Loading::new());
         self.search_task = Some(match source {
             Source::YouTube => tokio::task::spawn_blocking(move || search_youtube_blocking(&query)),
             Source::InternetArchive => tokio::spawn(async move { search_archive(&query).await }),
