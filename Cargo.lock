@@ -863,6 +863,7 @@ dependencies = [
  "crossterm",
  "ratatui",
  "reqwest",
+ "retrotermplayer",
  "serde_json",
  "tokio",
 ]
@@ -970,6 +971,11 @@ dependencies = [
  "web-sys",
  "winreg",
 ]
+
+[[package]]
+name = "retrotermplayer"
+version = "0.1.0"
+source = "git+https://github.com/rezkhaleghi/retrotermplayer#fae510db5eb599377338630b3046769e27ede01e"
 
 [[package]]
 name = "rustc-demangle"
