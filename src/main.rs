@@ -10,6 +10,7 @@ mod search;
 mod stream;
 mod ui;
 mod visualizer;
+mod video;
 
 use std::io;
 use std::path::PathBuf;

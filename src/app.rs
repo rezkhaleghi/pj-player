@@ -1,16 +1,17 @@
 use crate::error::AppError;
 use crate::loading::Loading;
 use crate::offlinePlayer::{ load_audio_files, load_entries, load_entries_with_cancel };
+use crate::search::{ search_archive, search_youtube_blocking };
 use crate::stream::{ stream_audio, StreamInfo };
+use crate::video::{ VideoMode, VideoPlayer };
+use crate::visualizer::{ Visualizer, VISUALIZATION_BAR_COUNT };
+
 use std::io::{ Read, Write };
 use std::path::PathBuf;
 use std::process::{ Child, Command, Stdio };
 use std::sync::{ atomic::{ AtomicBool, Ordering }, Arc, Mutex };
 use std::thread::{ self, JoinHandle };
 use std::time::Instant;
-
-use crate::search::{ search_archive, search_youtube_blocking };
-use crate::visualizer::{ Visualizer, VISUALIZATION_BAR_COUNT };
 
 const FFMPEG_PATH: &str = "ffmpeg";
 const FFPLAY_PATH: &str = "ffplay";
@@ -377,6 +378,10 @@ pub struct AppUi {
     pub position: f64,
     pub playback_started_at: Option<Instant>,
     pub playback_base_position: f64,
+
+    pub current_video_id: Option<String>,
+    pub video_player: Option<VideoPlayer>,
+    pub video_mode: Option<VideoMode>,
 }
 
 impl AppUi {
@@ -418,6 +423,10 @@ impl AppUi {
             position: 0.0,
             playback_started_at: None,
             playback_base_position: 0.0,
+
+            current_video_id: None,
+            video_player: None,
+            video_mode: None,
         }
     }
 
@@ -428,10 +437,14 @@ impl AppUi {
 
         let query = self.search_input.clone();
         let source = self.source.clone();
+
         self.loading = Some(Loading::new());
+
         self.search_task = Some(match source {
-            Source::YouTube => tokio::task::spawn_blocking(move || search_youtube_blocking(&query)),
-            Source::InternetArchive => tokio::spawn(async move { search_archive(&query).await }),
+            Source::YouTube => {
+                tokio::task::spawn_blocking(move || search_youtube_blocking(&query))
+            }
+            Source::InternetArchive => { tokio::spawn(async move { search_archive(&query).await }) }
         });
     }
 
@@ -439,22 +452,27 @@ impl AppUi {
         let Some(task) = self.search_task.as_ref() else {
             return Ok(());
         };
+
         if !task.is_finished() {
             return Ok(());
         }
 
         let task = self.search_task.take().unwrap();
+
         match task.await.map_err(|error| AppError::Message(error.to_string()))? {
             Ok(results) => {
                 self.search_results = results;
+
                 self.selected_result_index = if self.search_results.is_empty() {
                     None
                 } else {
                     Some(0)
                 };
+
                 self.current_view = View::SearchResults;
                 self.loading = None;
             }
+
             Err(error) => {
                 self.loading = None;
                 self.notice = Some(error.to_string());
@@ -469,8 +487,13 @@ impl AppUi {
             task.abort();
         }
 
+        // Keep the YouTube video ID available for the optional video player.
+        self.current_video_id = Some(identifier.clone());
+
         let visualization_data = Arc::clone(&self.visualization_data);
+
         self.loading = Some(Loading::new());
+
         self.stream_task = Some(
             tokio::task::spawn_blocking(move || { stream_audio(&identifier, visualization_data) })
         );
@@ -480,11 +503,13 @@ impl AppUi {
         let Some(task) = self.stream_task.as_ref() else {
             return Ok(());
         };
+
         if !task.is_finished() {
             return Ok(());
         }
 
         let task = self.stream_task.take().unwrap();
+
         match task.await.map_err(|error| AppError::Message(error.to_string()))? {
             Ok((stream_process, stream_info)) => {
                 self.stream_process = Some(stream_process);
@@ -492,7 +517,9 @@ impl AppUi {
                 self.current_view = View::Streaming;
                 self.loading = None;
             }
+
             Err(error) => {
+                self.current_video_id = None;
                 self.loading = None;
                 self.notice = Some(error.to_string());
                 self.current_view = View::SearchResults;
@@ -502,8 +529,45 @@ impl AppUi {
         Ok(())
     }
 
+    pub fn start_video(&mut self, mode: VideoMode) -> Result<(), AppError> {
+        let Some(video_id) = self.current_video_id.clone() else {
+            return Err(AppError::Message("No YouTube video is currently playing.".to_string()));
+        };
+
+        let video_url = format!("https://www.youtube.com/watch?v={video_id}");
+
+        self.stop_video();
+
+        let video_player = VideoPlayer::start(video_url, mode, self.position).map_err(
+            AppError::Message
+        )?;
+
+        self.video_player = Some(video_player);
+        self.video_mode = Some(mode);
+
+        Ok(())
+    }
+
+    pub fn stop_video(&mut self) {
+        if let Some(video_player) = self.video_player.take() {
+            video_player.stop();
+        }
+
+        self.video_mode = None;
+    }
+
+    pub fn toggle_video(&mut self, mode: VideoMode) -> Result<(), AppError> {
+        if self.video_mode == Some(mode) && self.video_player.is_some() {
+            self.stop_video();
+            return Ok(());
+        }
+
+        self.start_video(mode)
+    }
+
     pub fn load_offline_folder(&mut self) -> Result<(), AppError> {
         let folder = PathBuf::from(self.folder_input.trim());
+
         self.offline_root = folder.clone();
         self.load_offline_directory(&folder)?;
         self.current_view = View::OfflineFiles;
@@ -516,16 +580,21 @@ impl AppUi {
         if let Some(task) = self.offline_search_task.take() {
             task.abort();
         }
+
         if let Some(cancel) = self.offline_search_cancel.take() {
             cancel.store(true, Ordering::Relaxed);
         }
+
         self.folder_input = folder.to_string_lossy().into_owned();
+
         self.offline_entries = load_entries(folder, &self.offline_search_input)?;
+
         self.offline_files = if self.offline_search_input.is_empty() {
             load_audio_files(folder)?
         } else {
             self.offline_entries.clone()
         };
+
         self.selected_offline_entry = self.offline_entries.first().map(|_| 0);
         self.selected_offline_index = self.offline_files.first().map(|_| 0);
 
@@ -536,6 +605,7 @@ impl AppUi {
         if let Some(task) = self.offline_search_task.take() {
             task.abort();
         }
+
         if let Some(cancel) = self.offline_search_cancel.take() {
             cancel.store(true, Ordering::Relaxed);
         }
@@ -548,9 +618,12 @@ impl AppUi {
 
         let folder = PathBuf::from(&self.folder_input);
         let query = self.offline_search_input.clone();
+
         let cancel = Arc::new(AtomicBool::new(false));
         let task_cancel = Arc::clone(&cancel);
+
         self.offline_search_cancel = Some(cancel);
+
         self.offline_search_task = Some(
             tokio::task::spawn_blocking(move || {
                 load_entries_with_cancel(&folder, &query, Some(&task_cancel))
@@ -562,6 +635,7 @@ impl AppUi {
         if let Some(cancel) = self.offline_search_cancel.take() {
             cancel.store(true, Ordering::Relaxed);
         }
+
         if let Some(task) = self.offline_search_task.take() {
             task.abort();
         }
@@ -571,16 +645,22 @@ impl AppUi {
         let Some(task) = self.offline_search_task.as_ref() else {
             return Ok(());
         };
+
         if !task.is_finished() {
             return Ok(());
         }
 
         let task = self.offline_search_task.take().unwrap();
+
         self.offline_search_cancel = None;
+
         self.offline_entries = task.await.map_err(|error| AppError::Message(error.to_string()))??;
+
         self.offline_files = self.offline_entries.clone();
+
         self.selected_offline_entry = self.offline_entries.first().map(|_| 0);
         self.selected_offline_index = self.offline_files.first().map(|_| 0);
+
         Ok(())
     }
 
@@ -618,16 +698,20 @@ impl AppUi {
 
         if finished {
             self.stop_streaming();
+
             if self.mode == Some(Mode::OfflinePlayer) {
-                let next_index = self.selected_offline_index.and_then(|index|
+                let next_index = self.selected_offline_index.and_then(|index| {
                     (index + 1 < self.offline_files.len()).then_some(index + 1)
-                );
+                });
+
                 self.selected_offline_index = next_index;
+
                 self.selected_offline_entry = self.selected_offline_index.and_then(|index| {
                     self.offline_entries
                         .iter()
                         .position(|entry| entry == &self.offline_files[index])
                 });
+
                 self.current_view = View::OfflineFiles;
             } else {
                 self.current_view = View::SearchResults;
@@ -638,6 +722,8 @@ impl AppUi {
     }
 
     pub fn stop_streaming(&mut self) {
+        self.stop_video();
+
         if let Some(stream_process) = self.stream_process.take() {
             stream_process.stop();
         }
@@ -647,6 +733,7 @@ impl AppUi {
         self.paused = false;
         self.position = 0.0;
         self.duration = 0.0;
+        self.current_video_id = None;
         self.playback_started_at = None;
         self.playback_base_position = 0.0;
     }
@@ -659,8 +746,10 @@ impl AppUi {
         if self.paused {
             self.stream_process
                 .as_ref()
-                .ok_or_else(|| AppError::Message("No stream process running".to_string()))?
+                .ok_or_else(|| { AppError::Message("No stream process running".to_string()) })?
                 .resume()?;
+
+            self.video_player.as_ref().map(|video_player| video_player.resume());
 
             self.paused = false;
             self.playback_base_position = self.position;
@@ -670,8 +759,10 @@ impl AppUi {
 
             self.stream_process
                 .as_ref()
-                .ok_or_else(|| AppError::Message("No stream process running".to_string()))?
+                .ok_or_else(|| { AppError::Message("No stream process running".to_string()) })?
                 .pause()?;
+
+            self.video_player.as_ref().map(|video_player| video_player.pause());
 
             self.paused = true;
             self.playback_started_at = None;
@@ -704,6 +795,10 @@ impl AppUi {
         };
 
         stream_process.seek(new_position)?;
+
+        if let Some(video_player) = &self.video_player {
+            video_player.seek(new_position).map_err(AppError::Message)?;
+        }
 
         self.position = new_position;
 
