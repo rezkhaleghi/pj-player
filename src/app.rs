@@ -1,16 +1,19 @@
 use crate::error::AppError;
 use crate::loading::Loading;
-use crate::offlinePlayer::{ load_audio_files, load_entries, load_entries_with_cancel };
-use crate::search::{ search_archive, search_youtube_blocking };
-use crate::stream::{ stream_audio, StreamInfo };
-use crate::video::{ VideoMode, VideoPlayer };
-use crate::visualizer::{ Visualizer, VISUALIZATION_BAR_COUNT };
+use crate::offlinePlayer::{load_audio_files, load_entries, load_entries_with_cancel};
+use crate::search::{search_archive, search_youtube_blocking};
+use crate::stream::{stream_audio, StreamInfo};
+use crate::video::{PlaybackClock, VideoMode, VideoPlayer};
+use crate::visualizer::{Visualizer, VISUALIZATION_BAR_COUNT};
 
-use std::io::{ Read, Write };
+use std::io::{Read, Write};
 use std::path::PathBuf;
-use std::process::{ Child, Command, Stdio };
-use std::sync::{ atomic::{ AtomicBool, Ordering }, Arc, Mutex };
-use std::thread::{ self, JoinHandle };
+use std::process::{Child, Command, Stdio};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
+use std::thread::{self, JoinHandle};
 use std::time::Instant;
 
 const FFMPEG_PATH: &str = "ffmpeg";
@@ -105,7 +108,7 @@ impl StreamProcess {
     pub fn start(
         direct_url: String,
         position: f64,
-        visualization_data: Arc<Mutex<Vec<u8>>>
+        visualization_data: Arc<Mutex<Vec<u8>>>,
     ) -> Result<Self, AppError> {
         reset_visualization(&visualization_data);
 
@@ -115,7 +118,7 @@ impl StreamProcess {
             &direct_url,
             position,
             Arc::clone(&visualization_data),
-            Arc::clone(&visualizer_running)
+            Arc::clone(&visualizer_running),
         )?;
 
         Ok(Self {
@@ -132,7 +135,7 @@ impl StreamProcess {
         direct_url: &str,
         position: f64,
         visualization_data: Arc<Mutex<Vec<u8>>>,
-        visualizer_running: Arc<AtomicBool>
+        visualizer_running: Arc<AtomicBool>,
     ) -> Result<(Child, Child, JoinHandle<()>), AppError> {
         let position = position.to_string();
 
@@ -158,28 +161,28 @@ impl StreamProcess {
             .stderr(Stdio::null())
             .spawn()?;
 
-        let mut ffplay = match
-            bundled_command(FFPLAY_PATH)
-                .args([
-                    "-nodisp",
-                    "-autoexit",
-                    "-loglevel",
-                    "warning",
-                    "-f",
-                    AUDIO_FORMAT,
-                    "-ar",
-                    AUDIO_SAMPLE_RATE,
-                    "-ch_layout",
-                    "stereo",
-                    "-i",
-                    "pipe:0",
-                ])
-                .stdin(Stdio::piped())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
+        let mut ffplay = match bundled_command(FFPLAY_PATH)
+            .args([
+                "-nodisp",
+                "-autoexit",
+                "-loglevel",
+                "warning",
+                "-f",
+                AUDIO_FORMAT,
+                "-ar",
+                AUDIO_SAMPLE_RATE,
+                "-ch_layout",
+                "stereo",
+                "-i",
+                "pipe:0",
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
         {
             Ok(process) => process,
+
             Err(error) => {
                 let _ = ffmpeg.kill();
                 let _ = ffmpeg.wait();
@@ -188,11 +191,13 @@ impl StreamProcess {
             }
         };
 
-        let mut ffmpeg_stdout = ffmpeg.stdout
+        let mut ffmpeg_stdout = ffmpeg
+            .stdout
             .take()
             .ok_or_else(|| AppError::Message("Failed to access ffmpeg stdout".to_string()))?;
 
-        let mut ffplay_stdin = ffplay.stdin
+        let mut ffplay_stdin = ffplay
+            .stdin
             .take()
             .ok_or_else(|| AppError::Message("Failed to access ffplay stdin".to_string()))?;
 
@@ -205,7 +210,9 @@ impl StreamProcess {
                     Ok(0) => {
                         break;
                     }
+
                     Ok(bytes_read) => bytes_read,
+
                     Err(_) => {
                         break;
                     }
@@ -258,7 +265,7 @@ impl StreamProcess {
             &self.direct_url,
             position,
             Arc::clone(&self.visualization_data),
-            Arc::clone(&visualizer_running)
+            Arc::clone(&visualizer_running),
         )?;
 
         Ok(Self {
@@ -317,7 +324,9 @@ impl Drop for StreamProcess {
 }
 
 fn pause_process(pid: u32) -> Result<(), AppError> {
-    let status = Command::new("kill").args(["-s", "STOP", &pid.to_string()]).status()?;
+    let status = Command::new("kill")
+        .args(["-s", "STOP", &pid.to_string()])
+        .status()?;
 
     if status.success() {
         Ok(())
@@ -331,7 +340,9 @@ fn pause_process(pid: u32) -> Result<(), AppError> {
 }
 
 fn resume_process(pid: u32) -> Result<(), AppError> {
-    let status = Command::new("kill").args(["-s", "CONT", &pid.to_string()]).status()?;
+    let status = Command::new("kill")
+        .args(["-s", "CONT", &pid.to_string()])
+        .status()?;
 
     if status.success() {
         Ok(())
@@ -398,6 +409,7 @@ pub struct AppUi {
     pub current_video_id: Option<String>,
     pub video_player: Option<VideoPlayer>,
     pub video_mode: Option<VideoMode>,
+    pub playback_clock: Arc<PlaybackClock>,
 }
 
 impl AppUi {
@@ -444,6 +456,7 @@ impl AppUi {
             current_video_id: None,
             video_player: None,
             video_mode: None,
+            playback_clock: Arc::new(PlaybackClock::new()),
         }
     }
 
@@ -453,15 +466,15 @@ impl AppUi {
         }
 
         let query = self.search_input.clone();
+
         let source = self.source.clone();
 
         self.loading = Some(Loading::new());
 
         self.search_task = Some(match source {
-            Source::YouTube => {
-                tokio::task::spawn_blocking(move || search_youtube_blocking(&query))
-            }
-            Source::InternetArchive => { tokio::spawn(async move { search_archive(&query).await }) }
+            Source::YouTube => tokio::task::spawn_blocking(move || search_youtube_blocking(&query)),
+
+            Source::InternetArchive => tokio::spawn(async move { search_archive(&query).await }),
         });
     }
 
@@ -476,7 +489,10 @@ impl AppUi {
 
         let task = self.search_task.take().unwrap();
 
-        match task.await.map_err(|error| AppError::Message(error.to_string()))? {
+        match task
+            .await
+            .map_err(|error| AppError::Message(error.to_string()))?
+        {
             Ok(results) => {
                 self.search_results = results;
 
@@ -487,6 +503,7 @@ impl AppUi {
                 };
 
                 self.current_view = View::SearchResults;
+
                 self.loading = None;
             }
 
@@ -510,9 +527,9 @@ impl AppUi {
 
         self.loading = Some(Loading::new());
 
-        self.stream_task = Some(
-            tokio::task::spawn_blocking(move || { stream_audio(&identifier, visualization_data) })
-        );
+        self.stream_task = Some(tokio::task::spawn_blocking(move || {
+            stream_audio(&identifier, visualization_data)
+        }));
     }
 
     pub async fn update_stream_task(&mut self) -> Result<(), AppError> {
@@ -526,11 +543,17 @@ impl AppUi {
 
         let task = self.stream_task.take().unwrap();
 
-        match task.await.map_err(|error| AppError::Message(error.to_string()))? {
+        match task
+            .await
+            .map_err(|error| AppError::Message(error.to_string()))?
+        {
             Ok((stream_process, stream_info)) => {
                 self.stream_process = Some(stream_process);
+
                 self.start_playback(stream_info.duration);
+
                 self.current_view = View::Streaming;
+
                 self.loading = None;
             }
 
@@ -556,7 +579,9 @@ impl AppUi {
 
         let task = self.seek_task.take().unwrap();
 
-        let result = task.await.map_err(|error| AppError::Message(error.to_string()))?;
+        let result = task
+            .await
+            .map_err(|error| AppError::Message(error.to_string()))?;
 
         match result {
             Ok(stream_process) => {
@@ -582,18 +607,30 @@ impl AppUi {
                     }
 
                     self.playback_started_at = None;
+
+                    self.playback_clock.set_position(self.position);
+
+                    self.playback_clock.set_playing(false);
                 } else {
                     self.playback_base_position = self.position;
+
                     self.playback_started_at = Some(Instant::now());
+
+                    self.playback_clock.set_position(self.position);
+
+                    self.playback_clock.set_playing(true);
                 }
             }
 
             Err(error) => {
                 self.stream_process = None;
+
                 self.stop_video();
 
                 self.paused = false;
                 self.playback_started_at = None;
+
+                self.playback_clock.set_playing(false);
 
                 self.notice = Some(format!("Seek failed: {error}"));
             }
@@ -604,18 +641,25 @@ impl AppUi {
 
     pub fn start_video(&mut self, mode: VideoMode) -> Result<(), AppError> {
         let Some(video_id) = self.current_video_id.clone() else {
-            return Err(AppError::Message("No YouTube video is currently playing.".to_string()));
+            return Err(AppError::Message(
+                "No YouTube video is currently playing.".to_string(),
+            ));
         };
 
         let video_url = format!("https://www.youtube.com/watch?v={video_id}");
 
         self.stop_video();
 
-        let video_player = VideoPlayer::start(video_url, mode, self.position).map_err(
-            AppError::Message
-        )?;
+        let video_player = VideoPlayer::start(
+            video_url,
+            mode,
+            self.position,
+            Arc::clone(&self.playback_clock),
+        )
+        .map_err(AppError::Message)?;
 
         self.video_player = Some(video_player);
+
         self.video_mode = Some(mode);
 
         Ok(())
@@ -642,8 +686,11 @@ impl AppUi {
         let folder = PathBuf::from(self.folder_input.trim());
 
         self.offline_root = folder.clone();
+
         self.load_offline_directory(&folder)?;
+
         self.current_view = View::OfflineFiles;
+
         self.notice = None;
 
         Ok(())
@@ -669,6 +716,7 @@ impl AppUi {
         };
 
         self.selected_offline_entry = self.offline_entries.first().map(|_| 0);
+
         self.selected_offline_index = self.offline_files.first().map(|_| 0);
 
         Ok(())
@@ -685,23 +733,25 @@ impl AppUi {
 
         if self.offline_search_input.is_empty() {
             let folder = PathBuf::from(&self.folder_input);
+
             let _ = self.load_offline_directory(&folder);
+
             return;
         }
 
         let folder = PathBuf::from(&self.folder_input);
+
         let query = self.offline_search_input.clone();
 
         let cancel = Arc::new(AtomicBool::new(false));
+
         let task_cancel = Arc::clone(&cancel);
 
         self.offline_search_cancel = Some(cancel);
 
-        self.offline_search_task = Some(
-            tokio::task::spawn_blocking(move || {
-                load_entries_with_cancel(&folder, &query, Some(&task_cancel))
-            })
-        );
+        self.offline_search_task = Some(tokio::task::spawn_blocking(move || {
+            load_entries_with_cancel(&folder, &query, Some(&task_cancel))
+        }));
     }
 
     pub fn cancel_offline_search(&mut self) {
@@ -727,11 +777,14 @@ impl AppUi {
 
         self.offline_search_cancel = None;
 
-        self.offline_entries = task.await.map_err(|error| AppError::Message(error.to_string()))??;
+        self.offline_entries = task
+            .await
+            .map_err(|error| AppError::Message(error.to_string()))??;
 
         self.offline_files = self.offline_entries.clone();
 
         self.selected_offline_entry = self.offline_entries.first().map(|_| 0);
+
         self.selected_offline_index = self.offline_files.first().map(|_| 0);
 
         Ok(())
@@ -741,8 +794,14 @@ impl AppUi {
         self.duration = duration;
         self.position = 0.0;
         self.playback_base_position = 0.0;
+
         self.playback_started_at = Some(Instant::now());
+
         self.paused = false;
+
+        self.playback_clock.set_position(self.position);
+
+        self.playback_clock.set_playing(true);
     }
 
     pub fn update_playback_position(&mut self) {
@@ -759,6 +818,8 @@ impl AppUi {
         if self.duration > 0.0 {
             self.position = self.position.min(self.duration);
         }
+
+        self.playback_clock.set_position(self.position);
     }
 
     /// Detects when ffplay exits naturally.
@@ -777,9 +838,9 @@ impl AppUi {
             self.stop_streaming();
 
             if self.mode == Some(Mode::OfflinePlayer) {
-                let next_index = self.selected_offline_index.and_then(|index|
-                    (index + 1 < self.offline_files.len()).then_some(index + 1)
-                );
+                let next_index = self
+                    .selected_offline_index
+                    .and_then(|index| (index + 1 < self.offline_files.len()).then_some(index + 1));
 
                 self.selected_offline_index = next_index;
 
@@ -807,6 +868,7 @@ impl AppUi {
          */
         if self.seek_task.is_some() {
             self.notice = Some("Seek is still in progress.".to_string());
+
             return;
         }
 
@@ -820,6 +882,11 @@ impl AppUi {
 
         self.paused = false;
         self.position = 0.0;
+
+        self.playback_clock.set_position(0.0);
+
+        self.playback_clock.set_playing(false);
+
         self.duration = 0.0;
         self.current_video_id = None;
         self.playback_started_at = None;
@@ -846,8 +913,14 @@ impl AppUi {
             }
 
             self.paused = false;
+
             self.playback_base_position = self.position;
+
             self.playback_started_at = Some(Instant::now());
+
+            self.playback_clock.set_position(self.position);
+
+            self.playback_clock.set_playing(true);
         } else {
             self.update_playback_position();
 
@@ -862,6 +935,10 @@ impl AppUi {
 
             self.paused = true;
             self.playback_started_at = None;
+
+            self.playback_clock.set_position(self.position);
+
+            self.playback_clock.set_playing(false);
         }
 
         Ok(())
@@ -889,6 +966,7 @@ impl AppUi {
 
         let Some(stream_process) = self.stream_process.take() else {
             self.notice = Some("No stream process running.".to_string());
+
             return Ok(());
         };
 
@@ -911,12 +989,22 @@ impl AppUi {
         self.stop_video();
 
         self.position = new_position;
+
         self.playback_base_position = new_position;
+
         self.playback_started_at = None;
 
-        self.seek_task = Some(
-            tokio::task::spawn_blocking(move || { stream_process.seek(new_position) })
-        );
+        /*
+         * Freeze the shared clock at the target position while the
+         * replacement audio pipeline is being created.
+         */
+        self.playback_clock.set_position(new_position);
+
+        self.playback_clock.set_playing(false);
+
+        self.seek_task = Some(tokio::task::spawn_blocking(move || {
+            stream_process.seek(new_position)
+        }));
 
         self.paused = was_paused;
 

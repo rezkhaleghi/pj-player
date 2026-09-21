@@ -1,11 +1,55 @@
-use std::sync::{ mpsc::{ self, Receiver, Sender }, Arc, Mutex };
-use std::thread::{ self, JoinHandle };
-use std::time::{ Duration, Instant };
+use std::sync::{
+    atomic::{AtomicBool, AtomicU64, Ordering},
+    mpsc::{self, Receiver, Sender},
+    Arc, Mutex,
+};
+use std::thread::{self, JoinHandle};
+use std::time::Duration;
 
 use retrotermplayer::{
-    decoder::{ DecoderProfile, FfmpegDecoder, VideoFrame },
-    source::{ VideoQuality, VideoSource, YouTubeSource },
+    decoder::{DecoderProfile, FfmpegDecoder, VideoFrame},
+    source::{VideoQuality, VideoSource, YouTubeSource},
 };
+
+const PLAYBACK_POSITION_SCALE: f64 = 1_000_000.0;
+
+pub struct PlaybackClock {
+    position_micros: AtomicU64,
+    playing: AtomicBool,
+}
+
+impl PlaybackClock {
+    pub fn new() -> Self {
+        Self {
+            position_micros: AtomicU64::new(0),
+            playing: AtomicBool::new(false),
+        }
+    }
+
+    pub fn set_position(&self, position: f64) {
+        let position = if position.is_finite() {
+            position.max(0.0)
+        } else {
+            0.0
+        };
+
+        let micros = (position * PLAYBACK_POSITION_SCALE).round() as u64;
+
+        self.position_micros.store(micros, Ordering::Relaxed);
+    }
+
+    pub fn position(&self) -> f64 {
+        (self.position_micros.load(Ordering::Relaxed) as f64) / PLAYBACK_POSITION_SCALE
+    }
+
+    pub fn set_playing(&self, playing: bool) {
+        self.playing.store(playing, Ordering::Relaxed);
+    }
+
+    pub fn is_playing(&self) -> bool {
+        self.playing.load(Ordering::Relaxed)
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VideoMode {
@@ -18,19 +62,17 @@ pub enum VideoMode {
 impl VideoMode {
     pub fn profile(self) -> DecoderProfile {
         match self {
-            Self::AsciiShading | Self::MonoBlock =>
-                DecoderProfile {
-                    width: 120,
-                    height: 72,
-                    fps: 15,
-                },
+            Self::AsciiShading | Self::MonoBlock => DecoderProfile {
+                width: 120,
+                height: 72,
+                fps: 15,
+            },
 
-            Self::MonoVideo | Self::Video =>
-                DecoderProfile {
-                    width: 128,
-                    height: 72,
-                    fps: 15,
-                },
+            Self::MonoVideo | Self::Video => DecoderProfile {
+                width: 128,
+                height: 72,
+                fps: 15,
+            },
         }
     }
 
@@ -70,7 +112,12 @@ pub struct VideoPlayer {
 }
 
 impl VideoPlayer {
-    pub fn start(video_url: String, mode: VideoMode, position: f64) -> Result<Self, String> {
+    pub fn start(
+        video_url: String,
+        mode: VideoMode,
+        position: f64,
+        playback_clock: Arc<PlaybackClock>,
+    ) -> Result<Self, String> {
         if !position.is_finite() || position < 0.0 {
             return Err("Video position must be finite and non-negative.".to_string());
         }
@@ -83,8 +130,7 @@ impl VideoPlayer {
 
         let (command_sender, command_receiver) = mpsc::channel();
 
-        let thread = thread::Builder
-            ::new()
+        let thread = thread::Builder::new()
             .name("pj-player-video".to_string())
             .spawn(move || {
                 run_video_thread(
@@ -93,7 +139,8 @@ impl VideoPlayer {
                     position,
                     frame_store,
                     error_store,
-                    command_receiver
+                    command_receiver,
+                    playback_clock,
                 );
             })
             .map_err(|error| format!("Could not start video thread: {error}"))?;
@@ -140,7 +187,9 @@ impl VideoPlayer {
             })
             .map_err(|error| format!("Could not seek video: {error}"))?;
 
-        response_receiver.recv().map_err(|error| format!("Video seek did not complete: {error}"))?
+        response_receiver
+            .recv()
+            .map_err(|error| format!("Video seek did not complete: {error}"))?
     }
 
     pub fn stop(mut self) {
@@ -172,13 +221,14 @@ fn run_video_thread(
     position: f64,
     frame_store: Arc<Mutex<Option<VideoFrame>>>,
     error_store: Arc<Mutex<Option<String>>>,
-    command_receiver: Receiver<VideoCommand>
+    command_receiver: Receiver<VideoCommand>,
+    playback_clock: Arc<PlaybackClock>,
 ) {
     let profile = mode.profile();
     let quality = mode.quality();
 
     let fps = profile.fps.max(1);
-    let frame_duration = Duration::from_secs_f64(1.0 / (fps as f64));
+    let frame_seconds = 1.0 / (fps as f64);
 
     let mut decoder = match create_decoder(&video_url, profile, quality, position) {
         Ok(decoder) => decoder,
@@ -190,7 +240,7 @@ fn run_video_thread(
     };
 
     let mut paused = false;
-    let mut next_frame_deadline = Instant::now();
+    let mut video_position = position;
 
     loop {
         if let Some(command) = receive_latest_command(&command_receiver) {
@@ -201,7 +251,6 @@ fn run_video_thread(
 
                 VideoCommand::Resume => {
                     paused = false;
-                    next_frame_deadline = Instant::now();
                 }
 
                 VideoCommand::Seek { position, response } => {
@@ -212,19 +261,15 @@ fn run_video_thread(
                         position,
                         &mut decoder,
                         &frame_store,
-                        &error_store
+                        &error_store,
                     );
 
                     if result.is_ok() {
+                        video_position = position;
                         paused = false;
-                        next_frame_deadline = Instant::now();
                     }
 
                     let _ = response.send(result);
-
-                    if paused {
-                        continue;
-                    }
                 }
 
                 VideoCommand::Stop => {
@@ -233,13 +278,14 @@ fn run_video_thread(
             }
         }
 
-        if paused {
-            match command_receiver.recv_timeout(Duration::from_millis(50)) {
-                Ok(VideoCommand::Pause) => {}
+        if paused || !playback_clock.is_playing() {
+            match command_receiver.recv_timeout(Duration::from_millis(20)) {
+                Ok(VideoCommand::Pause) => {
+                    paused = true;
+                }
 
                 Ok(VideoCommand::Resume) => {
                     paused = false;
-                    next_frame_deadline = Instant::now();
                 }
 
                 Ok(VideoCommand::Seek { position, response }) => {
@@ -250,12 +296,12 @@ fn run_video_thread(
                         position,
                         &mut decoder,
                         &frame_store,
-                        &error_store
+                        &error_store,
                     );
 
                     if result.is_ok() {
+                        video_position = position;
                         paused = false;
-                        next_frame_deadline = Instant::now();
                     }
 
                     let _ = response.send(result);
@@ -275,56 +321,45 @@ fn run_video_thread(
             continue;
         }
 
+        let target_position = playback_clock.position();
+
         /*
-         * FFmpeg can produce raw frames much faster than real-time.
+         * The application playback clock is the video clock.
          *
-         * The decoder itself does not sleep between frames, so we explicitly
-         * pace consumption at the profile's FPS.
+         * FFmpeg decoding can start later than audio playback, especially
+         * after a seek. When that happens, discard stale decoded frames until
+         * the video catches up to the position the audio is currently playing.
+         * This prevents decoder startup latency from becoming permanent A/V
+         * drift after every seek.
          */
-        let now = Instant::now();
-
-        if now < next_frame_deadline {
-            let wait = next_frame_deadline - now;
-
-            match command_receiver.recv_timeout(wait) {
-                Ok(VideoCommand::Pause) => {
-                    paused = true;
+        if video_position + frame_seconds * 0.5 < target_position {
+            match decoder.next_frame() {
+                Ok(Some(_)) => {
+                    video_position += frame_seconds;
+                    continue;
                 }
 
-                Ok(VideoCommand::Resume) => {
-                    paused = false;
-                    next_frame_deadline = Instant::now();
-                }
-
-                Ok(VideoCommand::Seek { position, response }) => {
-                    let result = seek_decoder(
-                        &video_url,
-                        profile,
-                        quality,
-                        position,
-                        &mut decoder,
-                        &frame_store,
-                        &error_store
-                    );
-
-                    if result.is_ok() {
-                        paused = false;
-                        next_frame_deadline = Instant::now();
-                    }
-
-                    let _ = response.send(result);
-                }
-
-                Ok(VideoCommand::Stop) => {
+                Ok(None) => {
                     return;
                 }
 
-                Err(mpsc::RecvTimeoutError::Timeout) => {}
-
-                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                Err(error) => {
+                    set_error(&error_store, error);
                     return;
                 }
             }
+        }
+
+        /*
+         * If decoding has moved slightly ahead of the shared clock, wait for
+         * the clock rather than displaying a frame too early.
+         */
+        if video_position > target_position + frame_seconds * 0.5 {
+            let ahead = video_position - target_position;
+
+            let wait = Duration::from_secs_f64(ahead.min(0.02));
+
+            thread::sleep(wait.max(Duration::from_millis(1)));
 
             continue;
         }
@@ -337,17 +372,7 @@ fn run_video_thread(
                     *frame = Some(next_frame);
                 }
 
-                next_frame_deadline += frame_duration;
-
-                /*
-                 * If decoding/rendering falls behind, don't accumulate
-                 * stale deadlines forever.
-                 */
-                let now = Instant::now();
-
-                if next_frame_deadline < now {
-                    next_frame_deadline = now;
-                }
+                video_position += frame_seconds;
             }
 
             Ok(None) => {
@@ -388,14 +413,15 @@ fn merge_commands(current: VideoCommand, next: VideoCommand) -> VideoCommand {
              * receive a response. Since only the newest seek will actually be
              * performed, report cancellation to the older caller.
              */
-            if let VideoCommand::Seek { response: old_response, .. } = current {
+            if let VideoCommand::Seek {
+                response: old_response,
+                ..
+            } = current
+            {
                 let _ = old_response.send(Err("Video seek superseded.".to_string()));
             }
 
-            VideoCommand::Seek {
-                position,
-                response,
-            }
+            VideoCommand::Seek { position, response }
         }
 
         VideoCommand::Stop => {
@@ -420,12 +446,10 @@ fn merge_commands(current: VideoCommand, next: VideoCommand) -> VideoCommand {
             }
         }
 
-        VideoCommand::Resume => {
-            match current {
-                VideoCommand::Seek { .. } => current,
-                _ => VideoCommand::Resume,
-            }
-        }
+        VideoCommand::Resume => match current {
+            VideoCommand::Seek { .. } => current,
+            _ => VideoCommand::Resume,
+        },
     }
 }
 
@@ -436,7 +460,7 @@ fn seek_decoder(
     position: f64,
     decoder: &mut FfmpegDecoder,
     frame_store: &Arc<Mutex<Option<VideoFrame>>>,
-    error_store: &Arc<Mutex<Option<String>>>
+    error_store: &Arc<Mutex<Option<String>>>,
 ) -> Result<(), String> {
     let mut new_decoder = create_decoder(video_url, profile, quality, position)?;
 
@@ -474,15 +498,14 @@ fn create_decoder(
     video_url: &str,
     profile: DecoderProfile,
     quality: VideoQuality,
-    position: f64
+    position: f64,
 ) -> Result<FfmpegDecoder, String> {
     let source = VideoSource::YouTube(YouTubeSource {
         url: video_url.to_string(),
     });
 
-    FfmpegDecoder::new_at_position(source, profile, quality, position).map_err(|error|
-        error.to_string()
-    )
+    FfmpegDecoder::new_at_position(source, profile, quality, position)
+        .map_err(|error| error.to_string())
 }
 
 fn set_error(error_store: &Arc<Mutex<Option<String>>>, error: String) {
