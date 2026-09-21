@@ -2,7 +2,7 @@ use crate::app::bundled_command;
 use reqwest::Client;
 use serde_json::Value;
 
-use crate::app::{ SearchResult, Source };
+use crate::app::{SearchResult, Source};
 use crate::error::AppError;
 
 const YT_DLP_PATH: &str = "yt-dlp";
@@ -60,11 +60,8 @@ pub async fn search_archive(query: &str) -> Result<Vec<SearchResult>, AppError> 
 
     if let Some(items) = json["response"]["docs"].as_array() {
         for item in items {
-            if
-                let (Some(identifier), Some(title)) = (
-                    item["identifier"].as_str(),
-                    item["title"].as_str(),
-                )
+            if let (Some(identifier), Some(title)) =
+                (item["identifier"].as_str(), item["title"].as_str())
             {
                 results.push(SearchResult {
                     identifier: identifier.to_string(),

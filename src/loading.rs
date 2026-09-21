@@ -1,6 +1,10 @@
 use std::time::Instant;
 
-use ratatui::{ layout::Rect, prelude::*, widgets::{ Block, Borders, Paragraph } };
+use ratatui::{
+    layout::Rect,
+    prelude::*,
+    widgets::{Block, Borders, Paragraph},
+};
 
 pub struct Loading {
     started_at: Instant,
@@ -33,7 +37,7 @@ impl Loading {
             area.x + area.width.saturating_sub(width) / 2,
             area.y + area.height.saturating_sub(height) / 2,
             width,
-            height
+            height,
         );
         let bar_width = loading_area.width.saturating_sub(2) as usize;
 
@@ -45,9 +49,9 @@ impl Loading {
                     Block::default()
                         .borders(Borders::ALL)
                         .title("Loading")
-                        .style(Style::default().fg(Color::LightGreen))
+                        .style(Style::default().fg(Color::LightGreen)),
                 ),
-            loading_area
+            loading_area,
         );
     }
 }

@@ -1,5 +1,5 @@
-use std::path::{ Path, PathBuf };
-use std::sync::atomic::{ AtomicBool, Ordering };
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::error::AppError;
 
@@ -7,17 +7,19 @@ pub const SUPPORTED_EXTENSIONS: &[&str] = &["mp3", "m4a", "wav", "flac", "ogg", 
 
 pub fn load_audio_files(folder: &Path) -> Result<Vec<PathBuf>, AppError> {
     if !folder.is_dir() {
-        return Err(AppError::Message(format!("Not a folder: {}", folder.display())));
+        return Err(AppError::Message(format!(
+            "Not a folder: {}",
+            folder.display()
+        )));
     }
 
-    let mut files: Vec<PathBuf> = std::fs
-        ::read_dir(folder)?
+    let mut files: Vec<PathBuf> = std::fs::read_dir(folder)?
         .filter_map(Result::ok)
         .map(|entry| entry.path())
         .filter(|path| {
-            !is_hidden(path) &&
-                path.is_file() &&
-                path
+            !is_hidden(path)
+                && path.is_file()
+                && path
                     .extension()
                     .and_then(|extension| extension.to_str())
                     .is_some_and(|extension| {
@@ -37,10 +39,13 @@ pub fn load_entries(folder: &Path, query: &str) -> Result<Vec<PathBuf>, AppError
 pub fn load_entries_with_cancel(
     folder: &Path,
     query: &str,
-    cancel: Option<&AtomicBool>
+    cancel: Option<&AtomicBool>,
 ) -> Result<Vec<PathBuf>, AppError> {
     if !folder.is_dir() {
-        return Err(AppError::Message(format!("Not a folder: {}", folder.display())));
+        return Err(AppError::Message(format!(
+            "Not a folder: {}",
+            folder.display()
+        )));
     }
 
     let query = query.to_lowercase();
@@ -48,8 +53,7 @@ pub fn load_entries_with_cancel(
         return load_matching_audio_files(folder, &query, cancel);
     }
 
-    let mut entries: Vec<PathBuf> = std::fs
-        ::read_dir(folder)?
+    let mut entries: Vec<PathBuf> = std::fs::read_dir(folder)?
         .filter_map(Result::ok)
         .map(|entry| entry.path())
         .filter(|path| {
@@ -64,7 +68,10 @@ pub fn load_entries_with_cancel(
         .collect();
 
     entries.sort_by_key(|path| {
-        ((!path.is_dir(),), path.file_name().map(|name| name.to_os_string()))
+        (
+            (!path.is_dir(),),
+            path.file_name().map(|name| name.to_os_string()),
+        )
     });
     Ok(entries)
 }
@@ -72,7 +79,7 @@ pub fn load_entries_with_cancel(
 fn load_matching_audio_files(
     folder: &Path,
     query: &str,
-    cancel: Option<&AtomicBool>
+    cancel: Option<&AtomicBool>,
 ) -> Result<Vec<PathBuf>, AppError> {
     let mut entries = Vec::new();
 
@@ -95,10 +102,9 @@ fn load_matching_audio_files(
 
         if file_type.is_dir() {
             entries.extend(load_matching_audio_files(&path, query, cancel)?);
-        } else if
-            file_type.is_file() &&
-            is_audio_file(&path) &&
-            path.to_string_lossy().to_lowercase().contains(query)
+        } else if file_type.is_file()
+            && is_audio_file(&path)
+            && path.to_string_lossy().to_lowercase().contains(query)
         {
             entries.push(path);
         }
@@ -109,8 +115,8 @@ fn load_matching_audio_files(
 }
 
 fn is_audio_file(path: &Path) -> bool {
-    path.is_file() &&
-        path
+    path.is_file()
+        && path
             .extension()
             .and_then(|extension| extension.to_str())
             .is_some_and(|extension| {

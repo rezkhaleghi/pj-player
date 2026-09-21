@@ -1,4 +1,4 @@
-use std::sync::{ Arc, Mutex };
+use std::sync::{Arc, Mutex};
 
 const BYTES_PER_SAMPLE: usize = 2;
 const CHANNELS: usize = 2;
@@ -29,18 +29,16 @@ impl Visualizer {
 
     /// Processes raw stereo s16le PCM data and updates the visualization.
     pub fn process(&mut self, audio_data: &[u8], visualization_data: &Arc<Mutex<Vec<u8>>>) {
-        let mut frame_energies = Vec::with_capacity(
-            (self.partial_frame_len + audio_data.len()) / BYTES_PER_FRAME
-        );
+        let mut frame_energies =
+            Vec::with_capacity((self.partial_frame_len + audio_data.len()) / BYTES_PER_FRAME);
         let mut input = audio_data;
 
         if self.partial_frame_len > 0 {
             let bytes_needed = BYTES_PER_FRAME - self.partial_frame_len;
 
             if input.len() < bytes_needed {
-                self.partial_frame[
-                    self.partial_frame_len..self.partial_frame_len + input.len()
-                ].copy_from_slice(input);
+                self.partial_frame[self.partial_frame_len..self.partial_frame_len + input.len()]
+                    .copy_from_slice(input);
                 self.partial_frame_len += input.len();
                 return;
             }
@@ -79,16 +77,9 @@ impl Visualizer {
             }
 
             let samples = &frame_energies[start_frame..end_frame];
-            let rms = (
-                samples
-                    .iter()
-                    .map(|energy| energy.0)
-                    .sum::<f64>() / (samples.len() as f64)
-            ).sqrt();
-            let peak = samples
-                .iter()
-                .map(|energy| energy.1)
-                .fold(0.0f64, f64::max);
+            let rms = (samples.iter().map(|energy| energy.0).sum::<f64>() / (samples.len() as f64))
+                .sqrt();
+            let peak = samples.iter().map(|energy| energy.1).fold(0.0f64, f64::max);
 
             *level = (rms * RMS_SENSITIVITY + peak * PEAK_SENSITIVITY).clamp(0.0, 10.0);
         }

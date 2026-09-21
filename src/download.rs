@@ -1,9 +1,9 @@
 use serde_json::Value;
 use std::env;
-use std::fs::{ self, File };
+use std::fs::{self, File};
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::{ Arc, Mutex };
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 use crate::app::bundled_command;
@@ -13,8 +13,7 @@ use crate::error::AppError;
 const YT_DLP_PATH: &str = "yt-dlp";
 
 fn get_download_path() -> Result<PathBuf, AppError> {
-    let home_dir = env
-        ::var("HOME")
+    let home_dir = env::var("HOME")
         .map_err(|_| AppError::Message("Could not find home directory".to_string()))?;
 
     Ok(PathBuf::from(home_dir).join("Downloads"))
@@ -23,7 +22,7 @@ fn get_download_path() -> Result<PathBuf, AppError> {
 pub fn download_youtube_audio(
     video_id: String,
     title: String,
-    download_status: Arc<Mutex<Option<String>>>
+    download_status: Arc<Mutex<Option<String>>>,
 ) {
     let status_message = format!("{} is downloading", title);
 
@@ -69,7 +68,14 @@ pub fn download_youtube_audio(
         let youtube_url = format!("https://www.youtube.com/watch?v={}", video_id);
 
         let status = bundled_command(YT_DLP_PATH)
-            .args(["--extract-audio", "--audio-format", "mp3", "-o", output_path, &youtube_url])
+            .args([
+                "--extract-audio",
+                "--audio-format",
+                "mp3",
+                "-o",
+                output_path,
+                &youtube_url,
+            ])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status();
@@ -77,12 +83,11 @@ pub fn download_youtube_audio(
         let result = match status {
             Ok(status) if status.success() => Ok(format!("{} downloaded successfully", title)),
 
-            Ok(status) =>
-                Err(AppError::Process {
-                    command: YT_DLP_PATH.to_string(),
-                    status: status.code(),
-                    stderr: String::new(),
-                }),
+            Ok(status) => Err(AppError::Process {
+                command: YT_DLP_PATH.to_string(),
+                status: status.code(),
+                stderr: String::new(),
+            }),
 
             Err(error) => Err(AppError::Io(error)),
         };
@@ -99,7 +104,7 @@ pub fn download_youtube_audio(
 pub fn download_archive_audio(
     identifier: String,
     title: String,
-    download_status: Arc<Mutex<Option<String>>>
+    download_status: Arc<Mutex<Option<String>>>,
 ) {
     let status_message = format!("{} is downloading", title);
 
@@ -152,7 +157,7 @@ pub fn download_archive_audio(
 fn download_archive_file(
     client: &reqwest::blocking::Client,
     identifier: &str,
-    output_path: &PathBuf
+    output_path: &PathBuf,
 ) -> Result<(), AppError> {
     let metadata_url = format!("https://archive.org/metadata/{}", identifier);
 
@@ -169,8 +174,7 @@ fn download_archive_file(
                 if let Some(download_name) = file["name"].as_str() {
                     let download_url = format!(
                         "https://archive.org/download/{}/{}",
-                        identifier,
-                        download_name
+                        identifier, download_name
                     );
 
                     let mut response = client.get(&download_url).send()?;
@@ -185,5 +189,7 @@ fn download_archive_file(
         }
     }
 
-    Err(AppError::Message("No suitable audio file found".to_string()))
+    Err(AppError::Message(
+        "No suitable audio file found".to_string(),
+    ))
 }
