@@ -15,20 +15,20 @@ mod visualizer;
 use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{ Duration, Instant };
 
 use crossterm::event::KeyEvent;
 use crossterm::{
-    event::{self, Event, KeyCode},
+    event::{ self, Event, KeyCode },
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{ disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen },
 };
 
 use ratatui::prelude::*;
 use tokio::main;
 
-use app::{AppUi, Mode, Source, View};
-use download::{download_archive_audio, download_youtube_audio};
+use app::{ AppUi, Mode, Source, View };
+use download::{ download_archive_audio, download_youtube_audio };
 use error::AppError;
 use stream::stream_local_audio;
 use ui::render;
@@ -57,21 +57,30 @@ async fn main() -> Result<(), AppError> {
 
 async fn run_app(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    app: &mut AppUi,
+    app: &mut AppUi
 ) -> Result<(), AppError> {
-    let tick_rate = Duration::from_millis(250);
+    /*
+     * 33ms gives the UI roughly 30 redraws/sec.
+     *
+     * More importantly, every blocking playback operation is kept away
+     * from this thread so crossterm remains responsive.
+     */
+    let tick_rate = Duration::from_millis(33);
     let mut last_tick = Instant::now();
 
     loop {
         app.update_stream_lifecycle()?;
         app.update_stream_task().await?;
+        app.update_seek_task().await?;
         app.update_search().await?;
         app.update_offline_search().await?;
         app.update_playback_position();
 
-        if app.current_view == View::OfflineFiles
-            && app.offline_autoplay
-            && app.stream_process.is_none()
+        if
+            app.current_view == View::OfflineFiles &&
+            app.offline_autoplay &&
+            app.stream_process.is_none() &&
+            app.seek_task.is_none()
         {
             start_offline_playback(app)?;
         }
@@ -84,10 +93,9 @@ async fn run_app(
 
         if crossterm::event::poll(timeout)? {
             if let Event::Key(key) = event::read()? {
-                if key.code == KeyCode::Char('c')
-                    && key
-                        .modifiers
-                        .contains(crossterm::event::KeyModifiers::CONTROL)
+                if
+                    key.code == KeyCode::Char('c') &&
+                    key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL)
                 {
                     if app.offline_search_task.is_some() {
                         app.cancel_offline_search();
@@ -126,45 +134,47 @@ async fn handle_key_event(app: &mut AppUi, key: KeyEvent) -> Result<(), AppError
 async fn handle_mode_selection(app: &mut AppUi, key: KeyEvent) -> Result<(), AppError> {
     match key.code {
         KeyCode::Up => {
-            app.selected_result_index =
-                Some(app.selected_result_index.unwrap_or(0).saturating_sub(1));
+            app.selected_result_index = Some(
+                app.selected_result_index.unwrap_or(0).saturating_sub(1)
+            );
         }
 
         KeyCode::Down => {
             app.selected_result_index = Some((app.selected_result_index.unwrap_or(0) + 1).min(3));
         }
 
-        KeyCode::Enter | KeyCode::Right => match app.selected_result_index.unwrap_or(0) {
-            0 => {
-                app.mode = Some(Mode::Stream);
-                app.source = Source::YouTube;
-                reset_search(app);
-                app.current_view = View::SearchInput;
-            }
+        KeyCode::Enter | KeyCode::Right =>
+            match app.selected_result_index.unwrap_or(0) {
+                0 => {
+                    app.mode = Some(Mode::Stream);
+                    app.source = Source::YouTube;
+                    reset_search(app);
+                    app.current_view = View::SearchInput;
+                }
 
-            1 => {
-                app.mode = Some(Mode::Download);
-                app.source = Source::YouTube;
-                reset_search(app);
-                app.current_view = View::SearchInput;
-            }
+                1 => {
+                    app.mode = Some(Mode::Download);
+                    app.source = Source::YouTube;
+                    reset_search(app);
+                    app.current_view = View::SearchInput;
+                }
 
-            2 => {
-                app.mode = Some(Mode::OfflinePlayer);
-                app.folder_input = home_directory();
-                app.offline_root = PathBuf::from(&app.folder_input);
-                app.offline_search_input.clear();
-                app.offline_searching = false;
-                app.current_view = View::FolderInput;
-            }
+                2 => {
+                    app.mode = Some(Mode::OfflinePlayer);
+                    app.folder_input = home_directory();
+                    app.offline_root = PathBuf::from(&app.folder_input);
+                    app.offline_search_input.clear();
+                    app.offline_searching = false;
+                    app.current_view = View::FolderInput;
+                }
 
-            3 => {
-                app.mode = Some(Mode::AboutApp);
-                app.current_view = View::About;
-            }
+                3 => {
+                    app.mode = Some(Mode::AboutApp);
+                    app.current_view = View::About;
+                }
 
-            _ => {}
-        },
+                _ => {}
+            }
 
         _ => {}
     }
@@ -284,8 +294,10 @@ async fn handle_offline_files(app: &mut AppUi, key: KeyEvent) -> Result<(), AppE
                     if entry.is_dir() {
                         app.offline_search_input.clear();
                         app.load_offline_directory(&entry)?;
-                    } else if let Some(audio_index) =
-                        app.offline_files.iter().position(|file| file == &entry)
+                    } else if
+                        let Some(audio_index) = app.offline_files
+                            .iter()
+                            .position(|file| file == &entry)
                     {
                         app.selected_offline_index = Some(audio_index);
                         app.offline_autoplay = true;
@@ -337,8 +349,10 @@ fn start_offline_playback(app: &mut AppUi) -> Result<(), AppError> {
         return Ok(());
     };
 
-    let (stream_process, stream_info) =
-        stream_local_audio(path, Arc::clone(&app.visualization_data))?;
+    let (stream_process, stream_info) = stream_local_audio(
+        path,
+        Arc::clone(&app.visualization_data)
+    )?;
 
     app.stream_process = Some(stream_process);
     app.start_playback(stream_info.duration);
@@ -435,7 +449,7 @@ async fn handle_search_results(app: &mut AppUi, key: KeyEvent) -> Result<(), App
                             download_youtube_audio(
                                 selected.identifier.clone(),
                                 selected.title.clone(),
-                                Arc::clone(&app.download_status),
+                                Arc::clone(&app.download_status)
                             );
                         }
 
@@ -443,7 +457,7 @@ async fn handle_search_results(app: &mut AppUi, key: KeyEvent) -> Result<(), App
                             download_archive_audio(
                                 selected.identifier.clone(),
                                 selected.title.clone(),
-                                Arc::clone(&app.download_status),
+                                Arc::clone(&app.download_status)
                             );
                         }
                     }
@@ -453,17 +467,18 @@ async fn handle_search_results(app: &mut AppUi, key: KeyEvent) -> Result<(), App
             }
         }
 
-        KeyCode::Left => match app.mode {
-            Some(Mode::Stream) => {
-                app.current_view = View::ModeSelection;
-            }
+        KeyCode::Left =>
+            match app.mode {
+                Some(Mode::Stream) => {
+                    app.current_view = View::ModeSelection;
+                }
 
-            Some(Mode::Download) => {
-                app.current_view = View::SourceSelection;
-            }
+                Some(Mode::Download) => {
+                    app.current_view = View::SourceSelection;
+                }
 
-            _ => {}
-        },
+                _ => {}
+            }
 
         _ => {}
     }
@@ -474,6 +489,15 @@ async fn handle_search_results(app: &mut AppUi, key: KeyEvent) -> Result<(), App
 async fn handle_streaming(app: &mut AppUi, key: KeyEvent) -> Result<(), AppError> {
     match key.code {
         KeyCode::Esc => {
+            /*
+             * A seek is deliberately allowed to finish rather than being
+             * detached/cancelled because spawn_blocking cannot safely abort
+             * once it has started.
+             */
+            if app.seek_task.is_some() {
+                return Ok(());
+            }
+
             app.stop_streaming();
 
             app.current_view = if app.mode == Some(Mode::OfflinePlayer) {
@@ -504,40 +528,41 @@ async fn handle_streaming(app: &mut AppUi, key: KeyEvent) -> Result<(), AppError
             change_offline_track(app, -1)?;
         }
 
-        KeyCode::Char(c) if c.is_ascii_digit() => match c {
-            '1'..='6' => {
-                let digit = c.to_digit(10).unwrap_or(1) as usize;
+        KeyCode::Char(c) if c.is_ascii_digit() =>
+            match c {
+                '1'..='6' => {
+                    let digit = c.to_digit(10).unwrap_or(1) as usize;
 
-                app.stop_video();
-                app.current_equalizer = digit - 1;
-            }
-
-            '7' => {
-                if let Err(error) = app.toggle_video(crate::video::VideoMode::AsciiShading) {
-                    app.notice = Some(error.to_string());
+                    app.stop_video();
+                    app.current_equalizer = digit - 1;
                 }
-            }
 
-            '8' => {
-                if let Err(error) = app.toggle_video(crate::video::VideoMode::MonoBlock) {
-                    app.notice = Some(error.to_string());
+                '7' => {
+                    if let Err(error) = app.toggle_video(crate::video::VideoMode::AsciiShading) {
+                        app.notice = Some(error.to_string());
+                    }
                 }
-            }
 
-            '9' => {
-                if let Err(error) = app.toggle_video(crate::video::VideoMode::MonoVideo) {
-                    app.notice = Some(error.to_string());
+                '8' => {
+                    if let Err(error) = app.toggle_video(crate::video::VideoMode::MonoBlock) {
+                        app.notice = Some(error.to_string());
+                    }
                 }
-            }
 
-            '0' => {
-                if let Err(error) = app.toggle_video(crate::video::VideoMode::Video) {
-                    app.notice = Some(error.to_string());
+                '9' => {
+                    if let Err(error) = app.toggle_video(crate::video::VideoMode::MonoVideo) {
+                        app.notice = Some(error.to_string());
+                    }
                 }
-            }
 
-            _ => {}
-        },
+                '0' => {
+                    if let Err(error) = app.toggle_video(crate::video::VideoMode::Video) {
+                        app.notice = Some(error.to_string());
+                    }
+                }
+
+                _ => {}
+            }
 
         _ => {}
     }
@@ -560,8 +585,7 @@ fn change_offline_track(app: &mut AppUi, amount: isize) -> Result<(), AppError> 
 
     app.selected_offline_index = Some(next_index as usize);
 
-    app.selected_offline_entry = app
-        .offline_entries
+    app.selected_offline_entry = app.offline_entries
         .iter()
         .position(|entry| entry == &app.offline_files[next_index as usize]);
 
