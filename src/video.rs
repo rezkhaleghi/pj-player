@@ -208,21 +208,13 @@ fn run_video_thread(
 
     let mut decoder = match create_decoder(&video_url, profile, quality, position) {
         Ok(decoder) => decoder,
-
         Err(error) => {
             set_error(&error_store, error);
             return;
         }
     };
 
-    /*
-     * Reusable FFmpeg pixel buffer.
-     *
-     * retrotermplayer returns the buffer to the VideoFrame, so after each
-     * decoded frame we take it back and reuse it for the next decode.
-     */
     let mut frame_buffer = Vec::new();
-
     let mut paused = false;
     let mut video_position = position;
 
@@ -310,29 +302,14 @@ fn run_video_thread(
         let target_position = playback_clock.position();
 
         /*
-         * Do not aggressively throw away decoded frames here.
+         * Do not aggressively discard frames.
          *
-         * The previous implementation attempted to catch up to the audio
-         * clock by repeatedly decoding and discarding frames. That is cheap
-         * for the low-quality modes but becomes counterproductive for the
-         * 480p modes because FFmpeg can spend all of its time decoding frames
-         * that are immediately thrown away.
-         *
-         * Instead, display every successfully decoded frame and allow the
-         * video position to naturally converge toward the audio clock.
-         *
-         * The audio clock still controls pause/resume and seek.
-         */
-
-        /*
-         * If decoding has moved slightly ahead of the shared clock, wait.
-         *
-         * We deliberately keep this threshold small so that the video does
-         * not visibly run ahead of the music.
+         * Every successfully decoded frame is published to the UI.
+         * The audio playback clock remains the source of truth for
+         * synchronization.
          */
         if video_position > target_position + frame_seconds * 0.75 {
             let ahead = video_position - target_position;
-
             let wait = Duration::from_secs_f64(ahead.min(0.03));
 
             thread::sleep(wait.max(Duration::from_millis(1)));
@@ -345,33 +322,21 @@ fn run_video_thread(
                 clear_error(&error_store);
 
                 /*
-                 * The decoder gives ownership of the reusable pixel buffer
-                 * to the frame. Once the frame has been stored, recover that
-                 * buffer from the frame when it is replaced on the next
-                 * iteration.
+                 * Publish the new frame while keeping its pixel buffer intact.
+                 *
+                 * Recycle the pixel buffer belonging to the PREVIOUS frame.
+                 * Taking the pixels from the newly published frame would leave
+                 * the UI with an empty frame and cause an out-of-bounds panic.
                  */
                 if let Ok(mut frame) = frame_store.lock() {
-                    *frame = Some(next_frame);
-                }
+                    let old_frame = frame.replace(next_frame);
 
-                /*
-                 * The actual decoded frame represents the next video frame.
-                 * Keep our logical position moving at the configured frame
-                 * rate rather than trying to compensate by throwing frames
-                 * away.
-                 */
-                video_position += frame_seconds;
-
-                /*
-                 * If the reusable buffer is currently empty, recover it from
-                 * the stored frame so FFmpeg does not allocate a fresh Vec on
-                 * every frame.
-                 */
-                if let Ok(mut frame) = frame_store.lock() {
-                    if let Some(stored_frame) = frame.as_mut() {
-                        frame_buffer = std::mem::take(&mut stored_frame.pixels);
+                    if let Some(old_frame) = old_frame {
+                        frame_buffer = old_frame.pixels;
                     }
                 }
+
+                video_position += frame_seconds;
             }
 
             Ok(None) => {
@@ -385,7 +350,6 @@ fn run_video_thread(
         }
     }
 }
-
 fn receive_latest_command(receiver: &Receiver<VideoCommand>) -> Option<VideoCommand> {
     let first = receiver.try_recv().ok()?;
 
