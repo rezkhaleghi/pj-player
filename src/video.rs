@@ -77,9 +77,13 @@ impl VideoMode {
 
     pub fn quality(self) -> VideoQuality {
         match self {
+            // These modes intentionally use lower source quality.
             Self::AsciiShading | Self::MonoBlock => VideoQuality::Medium,
 
-            Self::MonoVideo | Self::Video => VideoQuality::High,
+            // 480p is more than enough for a 128x72 terminal renderer.
+            // Using 720p here adds decoding/stream overhead without
+            // providing useful detail on the terminal.
+            Self::MonoVideo | Self::Video => VideoQuality::Normal,
         }
     }
 
@@ -237,7 +241,12 @@ fn run_video_thread(
         }
     };
 
-    // Reusable buffer for FFmpeg decoded frame data.
+    /*
+     * Reusable FFmpeg pixel buffer.
+     *
+     * retrotermplayer returns the buffer to the VideoFrame, so after each
+     * decoded frame we take it back and reuse it for the next decode.
+     */
     let mut frame_buffer = Vec::new();
 
     let mut paused = false;
@@ -262,7 +271,8 @@ fn run_video_thread(
                         position,
                         &mut decoder,
                         &frame_store,
-                        &error_store
+                        &error_store,
+                        &mut frame_buffer
                     );
 
                     if result.is_ok() {
@@ -297,7 +307,8 @@ fn run_video_thread(
                         position,
                         &mut decoder,
                         &frame_store,
-                        &error_store
+                        &error_store,
+                        &mut frame_buffer
                     );
 
                     if result.is_ok() {
@@ -325,40 +336,30 @@ fn run_video_thread(
         let target_position = playback_clock.position();
 
         /*
-         * The application playback clock is the video clock.
+         * Do not aggressively throw away decoded frames here.
          *
-         * FFmpeg decoding can start later than audio playback, especially
-         * after a seek. When that happens, discard stale decoded frames until
-         * the video catches up to the position the audio is currently playing.
-         * This prevents decoder startup latency from becoming permanent A/V
-         * drift after every seek.
+         * The previous implementation attempted to catch up to the audio
+         * clock by repeatedly decoding and discarding frames. That is cheap
+         * for the low-quality modes but becomes counterproductive for the
+         * 480p modes because FFmpeg can spend all of its time decoding frames
+         * that are immediately thrown away.
+         *
+         * Instead, display every successfully decoded frame and allow the
+         * video position to naturally converge toward the audio clock.
+         *
+         * The audio clock still controls pause/resume and seek.
          */
-        if video_position + frame_seconds * 0.5 < target_position {
-            match decoder.next_frame(&mut frame_buffer) {
-                Ok(Some(_)) => {
-                    video_position += frame_seconds;
-                    continue;
-                }
-
-                Ok(None) => {
-                    return;
-                }
-
-                Err(error) => {
-                    set_error(&error_store, error);
-                    return;
-                }
-            }
-        }
 
         /*
-         * If decoding has moved slightly ahead of the shared clock, wait for
-         * the clock rather than displaying a frame too early.
+         * If decoding has moved slightly ahead of the shared clock, wait.
+         *
+         * We deliberately keep this threshold small so that the video does
+         * not visibly run ahead of the music.
          */
-        if video_position > target_position + frame_seconds * 0.5 {
+        if video_position > target_position + frame_seconds * 0.75 {
             let ahead = video_position - target_position;
 
-            let wait = Duration::from_secs_f64(ahead.min(0.02));
+            let wait = Duration::from_secs_f64(ahead.min(0.03));
 
             thread::sleep(wait.max(Duration::from_millis(1)));
 
@@ -369,11 +370,34 @@ fn run_video_thread(
             Ok(Some(next_frame)) => {
                 clear_error(&error_store);
 
+                /*
+                 * The decoder gives ownership of the reusable pixel buffer
+                 * to the frame. Once the frame has been stored, recover that
+                 * buffer from the frame when it is replaced on the next
+                 * iteration.
+                 */
                 if let Ok(mut frame) = frame_store.lock() {
                     *frame = Some(next_frame);
                 }
 
+                /*
+                 * The actual decoded frame represents the next video frame.
+                 * Keep our logical position moving at the configured frame
+                 * rate rather than trying to compensate by throwing frames
+                 * away.
+                 */
                 video_position += frame_seconds;
+
+                /*
+                 * If the reusable buffer is currently empty, recover it from
+                 * the stored frame so FFmpeg does not allocate a fresh Vec on
+                 * every frame.
+                 */
+                if let Ok(mut frame) = frame_store.lock() {
+                    if let Some(stored_frame) = frame.as_mut() {
+                        frame_buffer = std::mem::take(&mut stored_frame.pixels);
+                    }
+                }
             }
 
             Ok(None) => {
@@ -458,7 +482,8 @@ fn seek_decoder(
     position: f64,
     decoder: &mut FfmpegDecoder,
     frame_store: &Arc<Mutex<Option<VideoFrame>>>,
-    error_store: &Arc<Mutex<Option<String>>>
+    error_store: &Arc<Mutex<Option<String>>>,
+    frame_buffer: &mut Vec<u8>
 ) -> Result<(), String> {
     let mut new_decoder = create_decoder(video_url, profile, quality, position)?;
 
@@ -469,9 +494,7 @@ fn seek_decoder(
      * process was spawned. It means we already have a frame from the new
      * playback position ready to display.
      */
-    let mut frame_buffer = Vec::new();
-
-    let first_frame = match new_decoder.next_frame(&mut frame_buffer) {
+    let first_frame = match new_decoder.next_frame(frame_buffer) {
         Ok(Some(frame)) => frame,
 
         Ok(None) => {
@@ -485,6 +508,12 @@ fn seek_decoder(
 
     *decoder = new_decoder;
 
+    /*
+     * The frame temporarily owns the reusable pixel buffer.
+     *
+     * Store the frame first. It will be recovered by the normal decoding loop
+     * before the next FFmpeg frame is requested.
+     */
     if let Ok(mut frame) = frame_store.lock() {
         *frame = Some(first_frame);
     }
