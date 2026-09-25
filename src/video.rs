@@ -1,14 +1,15 @@
 use std::sync::{
-    atomic::{AtomicBool, AtomicU64, Ordering},
-    mpsc::{self, Receiver, Sender},
-    Arc, Mutex,
+    atomic::{ AtomicBool, AtomicU64, Ordering },
+    mpsc::{ self, Receiver, Sender },
+    Arc,
+    Mutex,
 };
-use std::thread::{self, JoinHandle};
+use std::thread::{ self, JoinHandle };
 use std::time::Duration;
 
 use retrotermplayer::{
-    decoder::{DecoderProfile, FfmpegDecoder, VideoFrame},
-    source::{VideoQuality, VideoSource, YouTubeSource},
+    decoder::{ DecoderProfile, FfmpegDecoder, VideoFrame },
+    source::{ VideoQuality, VideoSource, YouTubeSource },
 };
 
 const PLAYBACK_POSITION_SCALE: f64 = 1_000_000.0;
@@ -27,11 +28,7 @@ impl PlaybackClock {
     }
 
     pub fn set_position(&self, position: f64) {
-        let position = if position.is_finite() {
-            position.max(0.0)
-        } else {
-            0.0
-        };
+        let position = if position.is_finite() { position.max(0.0) } else { 0.0 };
 
         let micros = (position * PLAYBACK_POSITION_SCALE).round() as u64;
 
@@ -62,17 +59,19 @@ pub enum VideoMode {
 impl VideoMode {
     pub fn profile(self) -> DecoderProfile {
         match self {
-            Self::AsciiShading | Self::MonoBlock => DecoderProfile {
-                width: 120,
-                height: 72,
-                fps: 15,
-            },
+            Self::AsciiShading | Self::MonoBlock =>
+                DecoderProfile {
+                    width: 120,
+                    height: 72,
+                    fps: 15,
+                },
 
-            Self::MonoVideo | Self::Video => DecoderProfile {
-                width: 128,
-                height: 72,
-                fps: 15,
-            },
+            Self::MonoVideo | Self::Video =>
+                DecoderProfile {
+                    width: 128,
+                    height: 72,
+                    fps: 15,
+                },
         }
     }
 
@@ -92,10 +91,6 @@ impl VideoMode {
 enum VideoCommand {
     Pause,
     Resume,
-    Seek {
-        position: f64,
-        response: Sender<Result<(), String>>,
-    },
     Stop,
 }
 
@@ -111,7 +106,7 @@ impl VideoPlayer {
         video_url: String,
         mode: VideoMode,
         position: f64,
-        playback_clock: Arc<PlaybackClock>,
+        playback_clock: Arc<PlaybackClock>
     ) -> Result<Self, String> {
         if !position.is_finite() || position < 0.0 {
             return Err("Video position must be finite and non-negative.".to_string());
@@ -125,7 +120,8 @@ impl VideoPlayer {
 
         let (command_sender, command_receiver) = mpsc::channel();
 
-        let thread = thread::Builder::new()
+        let thread = thread::Builder
+            ::new()
             .name("pj-player-video".to_string())
             .spawn(move || {
                 run_video_thread(
@@ -135,7 +131,7 @@ impl VideoPlayer {
                     frame_store,
                     error_store,
                     command_receiver,
-                    playback_clock,
+                    playback_clock
                 );
             })
             .map_err(|error| format!("Could not start video thread: {error}"))?;
@@ -198,7 +194,7 @@ fn run_video_thread(
     frame_store: Arc<Mutex<Option<VideoFrame>>>,
     error_store: Arc<Mutex<Option<String>>>,
     command_receiver: Receiver<VideoCommand>,
-    playback_clock: Arc<PlaybackClock>,
+    playback_clock: Arc<PlaybackClock>
 ) {
     let profile = mode.profile();
     let quality = mode.quality();
@@ -229,26 +225,6 @@ fn run_video_thread(
                     paused = false;
                 }
 
-                VideoCommand::Seek { position, response } => {
-                    let result = seek_decoder(
-                        &video_url,
-                        profile,
-                        quality,
-                        position,
-                        &mut decoder,
-                        &frame_store,
-                        &error_store,
-                        &mut frame_buffer,
-                    );
-
-                    if result.is_ok() {
-                        video_position = position;
-                        paused = false;
-                    }
-
-                    let _ = response.send(result);
-                }
-
                 VideoCommand::Stop => {
                     return;
                 }
@@ -263,26 +239,6 @@ fn run_video_thread(
 
                 Ok(VideoCommand::Resume) => {
                     paused = false;
-                }
-
-                Ok(VideoCommand::Seek { position, response }) => {
-                    let result = seek_decoder(
-                        &video_url,
-                        profile,
-                        quality,
-                        position,
-                        &mut decoder,
-                        &frame_store,
-                        &error_store,
-                        &mut frame_buffer,
-                    );
-
-                    if result.is_ok() {
-                        video_position = position;
-                        paused = false;
-                    }
-
-                    let _ = response.send(result);
                 }
 
                 Ok(VideoCommand::Stop) => {
@@ -368,114 +324,37 @@ fn receive_latest_command(receiver: &Receiver<VideoCommand>) -> Option<VideoComm
     Some(latest)
 }
 
-fn merge_commands(current: VideoCommand, next: VideoCommand) -> VideoCommand {
+fn merge_commands(_current: VideoCommand, next: VideoCommand) -> VideoCommand {
     match next {
-        VideoCommand::Seek { position, response } => {
-            /*
-             * If the previous command was also a seek, its caller must still
-             * receive a response. Since only the newest seek will actually be
-             * performed, report cancellation to the older caller.
-             */
-            if let VideoCommand::Seek {
-                response: old_response,
-                ..
-            } = current
-            {
-                let _ = old_response.send(Err("Video seek superseded.".to_string()));
-            }
-
-            VideoCommand::Seek { position, response }
-        }
-
         VideoCommand::Stop => {
-            /*
-             * Stop always wins.
-             */
-            if let VideoCommand::Seek { response, .. } = current {
-                let _ = response.send(Err("Video stopped.".to_string()));
-            }
-
+            // Stop always wins.
             VideoCommand::Stop
         }
 
         VideoCommand::Pause => {
-            /*
-             * Pause supersedes an older resume/pause state, but preserve a
-             * pending seek because the seek still needs to complete.
-             */
-            match current {
-                VideoCommand::Seek { .. } => current,
-                _ => VideoCommand::Pause,
-            }
+            // Pause supersedes the previous playback state.
+            VideoCommand::Pause
         }
 
-        VideoCommand::Resume => match current {
-            VideoCommand::Seek { .. } => current,
-            _ => VideoCommand::Resume,
-        },
+        VideoCommand::Resume => {
+            // Resume supersedes the previous playback state.
+            VideoCommand::Resume
+        }
     }
 }
-
-fn seek_decoder(
-    video_url: &str,
-    profile: DecoderProfile,
-    quality: VideoQuality,
-    position: f64,
-    decoder: &mut FfmpegDecoder,
-    frame_store: &Arc<Mutex<Option<VideoFrame>>>,
-    error_store: &Arc<Mutex<Option<String>>>,
-    frame_buffer: &mut Vec<u8>,
-) -> Result<(), String> {
-    let mut new_decoder = create_decoder(video_url, profile, quality, position)?;
-
-    /*
-     * Decode the first frame immediately.
-     *
-     * This means a successful seek does not merely mean that the new FFmpeg
-     * process was spawned. It means we already have a frame from the new
-     * playback position ready to display.
-     */
-    let first_frame = match new_decoder.next_frame(frame_buffer) {
-        Ok(Some(frame)) => frame,
-
-        Ok(None) => {
-            return Err("Video ended while seeking.".to_string());
-        }
-
-        Err(error) => {
-            return Err(error);
-        }
-    };
-
-    *decoder = new_decoder;
-
-    /*
-     * The frame temporarily owns the reusable pixel buffer.
-     *
-     * Store the frame first. It will be recovered by the normal decoding loop
-     * before the next FFmpeg frame is requested.
-     */
-    if let Ok(mut frame) = frame_store.lock() {
-        *frame = Some(first_frame);
-    }
-
-    clear_error(error_store);
-
-    Ok(())
-}
-
 fn create_decoder(
     video_url: &str,
     profile: DecoderProfile,
     quality: VideoQuality,
-    position: f64,
+    position: f64
 ) -> Result<FfmpegDecoder, String> {
     let source = VideoSource::YouTube(YouTubeSource {
         url: video_url.to_string(),
     });
 
-    FfmpegDecoder::new_at_position(source, profile, quality, position)
-        .map_err(|error| error.to_string())
+    FfmpegDecoder::new_at_position(source, profile, quality, position).map_err(|error|
+        error.to_string()
+    )
 }
 
 fn set_error(error_store: &Arc<Mutex<Option<String>>>, error: String) {
