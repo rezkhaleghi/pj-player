@@ -200,6 +200,9 @@ If you enjoy this app and would like to support my work:
 - Patreon : https://patreon.com/PocketJack
 Your support helps me continue developing free and open-source stuff.
 
+Doge → D8ArwStSd9rNmeKX2bUPGsbr9t8E68Ztfo                                                         │
+Tron → TA8T2vysRaRVh1dQX6RzMLqSQzXCMtUJwS   
+
 
 
 ## License
